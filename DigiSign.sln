@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigiSign", "DigiSign.csproj", "{FF02C0B6-207E-4FE6-81FE-2F9941F20664}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FF02C0B6-207E-4FE6-81FE-2F9941F20664}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FF02C0B6-207E-4FE6-81FE-2F9941F20664}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FF02C0B6-207E-4FE6-81FE-2F9941F20664}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FF02C0B6-207E-4FE6-81FE-2F9941F20664}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {27C3D944-E6D5-4335-AAA5-8BC6D37EEB02}
+	EndGlobalSection
+EndGlobal
