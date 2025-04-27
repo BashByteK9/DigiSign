@@ -40,7 +40,7 @@ namespace DigiSign
         {
             string xmlFilePath = @"D:\IP.xml";  // Replace with your actual XML file path
             var xmlData = ReadXmlData(xmlFilePath);
-            string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
+            //string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
 
             if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
@@ -218,17 +218,17 @@ namespace DigiSign
                 var cert = certs[0];
 
                 // Attempt to access the private key to trigger PIN prompt
-                try
-                {
-                    var privateKey = cert.PrivateKey;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Failed to access the private key. Ensure the USB token is inserted and unlocked.");
-                    Console.WriteLine($"Details: {ex.Message}");
-                    return null;
-                }
-
+                //try
+                //{
+                //    var privateKey = cert.PrivateKey;
+                //}
+                //catch (Exception ex)
+                //{
+                //    Console.WriteLine("Failed to access the private key. Ensure the USB token is inserted and unlocked.");
+                //    Console.WriteLine($"Details: {ex.Message}");
+                //    return null;
+                //}
+                cert.SetPinForPrivateKey(pin);
                 return cert;
             }
             catch (Exception ex)
