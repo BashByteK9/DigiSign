@@ -38,7 +38,7 @@ namespace DigiSign
         [STAThread]
         static void Main(string[] args)
         {
-            string xmlFilePath = @"D:\IP.xml";  // Replace with your actual XML file path
+            string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             var xmlData = ReadXmlData(xmlFilePath);
             string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
 
@@ -75,7 +75,7 @@ namespace DigiSign
 
                 if (validPdfFiles.Any())
                 {
-                    Console.WriteLine($"Found {validPdfFiles.Count} valid PDF files.");
+                    //MessageBox.Show($"Found {validPdfFiles.Count} valid PDF files.");
                     var cert = LoadCertificateFromUSBToken(commonName, pin);
 
                     if (cert != null)
@@ -87,7 +87,7 @@ namespace DigiSign
                         {
                             Console.WriteLine($"Processing PDF: {inputPdfPath}");
                             string inputFileName = Path.GetFileNameWithoutExtension(inputPdfPath);
-                            string outputFileName = $"{inputFileName}_signed.pdf";
+                            string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
 
                             SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath);
@@ -122,7 +122,7 @@ namespace DigiSign
                 Console.WriteLine("Invalid XML data: Missing required fields.");
             }
 
-            Console.ReadKey();
+            
         }
 
         static XmlData ReadXmlData(string xmlFilePath)
@@ -175,19 +175,6 @@ namespace DigiSign
 
                 // 9: Open output folder
                 xmlData.OpenOutputFolder = fileNameLists[9].Element("FILENAME")?.Value.Trim() ?? "Y";
-
-                // Debug output
-                //Console.WriteLine("Parsed XML Data:");
-                //Console.WriteLine($"InputFilePaths: {string.Join(", ", xmlData.InputFilePaths)}");
-                //Console.WriteLine($"OutputFolderPath: {xmlData.OutputFolderPath}");
-                //Console.WriteLine($"CommonName: {xmlData.CommonName}");
-                //Console.WriteLine($"Pin: {xmlData.Pin}");
-                //Console.WriteLine($"XCoordinate: {xmlData.XCoordinate}");
-                //Console.WriteLine($"YCoordinate: {xmlData.YCoordinate}");
-                //Console.WriteLine($"Width: {xmlData.Width}");
-                //Console.WriteLine($"Height: {xmlData.Height}");
-                //Console.WriteLine($"SignOnPage: {xmlData.SignOnPage}");
-                //Console.WriteLine($"OpenOutputFolder: {xmlData.OpenOutputFolder}");
 
                 return xmlData;
             }
@@ -388,14 +375,14 @@ namespace DigiSign
                     MakeSignature.SignDetached(appearance, externalSignature, new[] { bcCert }, null, null, null, 0, CryptoStandard.CMS);
 
                     Console.WriteLine($"PDF signed successfully: {outputPath}");
-                    LogToFile($"SUCCESS: Signed '{inputPath}' to '{outputPath}'", outputFolderPath);
+                    LogToFile($"SUCCESS | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Signed '{inputPath}' to '{outputPath}'", outputFolderPath);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error while signing the PDF {inputPath}: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
-                LogToFile($"ERROR: Failed to sign '{inputPath}'. Exception: {ex.Message}", outputFolderPath);
+                LogToFile($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}", outputFolderPath);
 
             }
 
@@ -407,8 +394,8 @@ namespace DigiSign
         {
             try
             {
-                string logFilePath = Path.Combine(outputFolderPath, "signing_log.txt");
-                string logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
+                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log.txt");
+                string logMessage = $"{message}";
                 File.AppendAllText(logFilePath, logMessage + Environment.NewLine);
             }
             catch (Exception ex)
