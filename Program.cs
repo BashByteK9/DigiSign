@@ -57,15 +57,11 @@ namespace DigiSign
                 string signOnPage = xmlData.SignOnPage ?? "L"; // Default to Last page
                 string openOutputFolder = xmlData.OpenOutputFolder ?? "Y"; // Default to Yes
 
-                Console.WriteLine("Pin: " + pin);
-                Console.WriteLine("SignOnPage: " + signOnPage);
-                Console.WriteLine("OpenOutputFolder: " + openOutputFolder);
 
                 // Ensure output folder exists
                 if (!Directory.Exists(outputFolderPath))
                 {
                     Directory.CreateDirectory(outputFolderPath);
-                    Console.WriteLine($"Created output folder: {outputFolderPath}");
                 }
 
                 // Filter valid PDF files
@@ -80,12 +76,9 @@ namespace DigiSign
 
                     if (cert != null)
                     {
-                        Console.WriteLine("Certificate found: " + cert.Subject);
-
                         // Process each PDF file
                         foreach (string inputPdfPath in validPdfFiles)
                         {
-                            Console.WriteLine($"Processing PDF: {inputPdfPath}");
                             string inputFileName = Path.GetFileNameWithoutExtension(inputPdfPath);
                             string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
@@ -99,27 +92,27 @@ namespace DigiSign
                             try
                             {
                                 Process.Start("explorer.exe", outputFolderPath);
-                                Console.WriteLine("Opened output folder.");
+
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"Error opening output folder: {ex.Message}");
+                                MessageBox.Show($"Error opening output folder: {ex.Message}");
                             }
                         }
                     }
                     else
                     {
-                        Console.WriteLine("Certificate not found.");
+                        MessageBox.Show("Certificate not found.");
                     }
                 }
                 else
                 {
-                    Console.WriteLine("No valid PDF files found in the specified input paths.");
+                    MessageBox.Show("No valid PDF files found in the specified input paths.");
                 }
             }
             else
             {
-                Console.WriteLine("Invalid XML data: Missing required fields.");
+                MessageBox.Show("Invalid XML data: Missing required fields.");
             }
 
             
@@ -136,7 +129,7 @@ namespace DigiSign
                 var fileNameLists = envelope.Element("FILENAMELIST")?.Elements("FILENAMELIST").ToList();
                 if (fileNameLists == null || fileNameLists.Count < 10)
                 {
-                    Console.WriteLine("Invalid or incomplete XML structure.");
+                    MessageBox.Show("Invalid or incomplete XML structure.");
                     return null;
                 }
 
@@ -180,7 +173,7 @@ namespace DigiSign
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error parsing XML: " + ex.Message);
+                MessageBox.Show("Error parsing XML: " + ex.Message);
                 return null;
             }
         }
@@ -194,11 +187,11 @@ namespace DigiSign
                 store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
                 var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
 
-                Console.WriteLine($"Found {certs.Count} certificate(s) for Common Name: {commonName}");
+    
 
                 if (certs.Count == 0)
                 {
-                    Console.WriteLine("No matching certificates found.");
+                    MessageBox.Show("No matching certificates found.");
                     return null;
                 }
 
@@ -220,7 +213,7 @@ namespace DigiSign
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error loading certificate: {ex.Message}");
+                MessageBox.Show($"Error loading certificate: {ex.Message}");
                 return null;
             }
             finally
@@ -244,12 +237,11 @@ namespace DigiSign
 
                 string signatureText =
                     $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-                Console.WriteLine($"Signature Text: {signatureText}");
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
                 int pageCount = reader.NumberOfPages;
-                Console.WriteLine($"PDF has {pageCount} pages.");
+              
 
                 // Determine which pages to sign
                 var pagesToSign = new List<int>();
@@ -279,7 +271,7 @@ namespace DigiSign
                         iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
                         float pageWidth = pageSize.Width;
                         float pageHeight = pageSize.Height;
-                        Console.WriteLine($"Page {page} size: {pageWidth}x{pageHeight}");
+                        
 
                         // Validate coordinates
                         float adjustedX = x;
@@ -289,7 +281,7 @@ namespace DigiSign
 
                         if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
                         {
-                            Console.WriteLine($"Warning: Signature rectangle is outside page {page} boundaries. Adjusting coordinates.");
+                            MessageBox.Show($"Warning: Signature rectangle is outside page {page} boundaries. Adjusting coordinates.");
                             adjustedX = Math.Max(50, x);
                             adjustedY = Math.Max(50, y);
                             adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
@@ -305,17 +297,17 @@ namespace DigiSign
 
                         // Draw on the actual page content
                         PdfContentByte over = stamper.GetOverContent(page);
-                        over.SaveState();                      
+                        over.SaveState();
 
                         // Draw text with wrapping
                         BaseFont baseFont = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
                         float fontSize = 9;
                         float padding = 5;
                         float maxTextWidth = adjustedWidth - 2 * padding;
-                        float leading = 11;
+                        float leading = fontSize + 2; // Line spacing
                         float maxY = adjustedY + adjustedHeight - padding;
                         float minY = adjustedY + padding;
-                        float currentY = maxY - 5;
+                        float currentY = maxY;
 
                         over.BeginText();
                         over.SetFontAndSize(baseFont, fontSize);
@@ -326,44 +318,46 @@ namespace DigiSign
                             string line = rawLine.Trim();
                             if (string.IsNullOrEmpty(line)) continue;
 
+                            // Break the line into smaller chunks if it exceeds the max width
+                            List<string> wrappedLines = new List<string>();
                             string[] words = line.Split(' ');
-                            string wrappedLine = "";
+                            string currentLine = "";
 
                             foreach (string word in words)
                             {
-                                string testLine = string.IsNullOrEmpty(wrappedLine) ? word : wrappedLine + " " + word;
+                                string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
                                 float lineWidth = baseFont.GetWidthPoint(testLine, fontSize);
 
                                 if (lineWidth <= maxTextWidth)
                                 {
-                                    wrappedLine = testLine;
+                                    currentLine = testLine;
                                 }
                                 else
                                 {
-                                    if (currentY < minY) break;
-                                    over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                                    currentY -= leading;
-                                    wrappedLine = word;
+                                    wrappedLines.Add(currentLine);
+                                    currentLine = word;
                                 }
                             }
 
-                            if (!string.IsNullOrEmpty(wrappedLine) && currentY >= minY)
+                            if (!string.IsNullOrEmpty(currentLine))
                             {
+                                wrappedLines.Add(currentLine);
+                            }
+
+                            // Render each wrapped line
+                            foreach (string wrappedLine in wrappedLines)
+                            {
+                                if (currentY - leading < minY) break; // Stop if there's no space left
                                 over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
                                 currentY -= leading;
                             }
                         }
 
                         over.EndText();
+
                         over.RestoreState();
                     }
 
-                    // Ensure the certificate has the private key
-                    if (!cert.HasPrivateKey)
-                    {
-                        Console.WriteLine("Certificate does not have a private key.");
-                        return;
-                    }
 
                     // Create a custom implementation of IExternalSignature
                     IExternalSignature externalSignature = new SafeCertificateSignature(cert, "SHA-256");
@@ -374,19 +368,16 @@ namespace DigiSign
                     // Sign the document
                     MakeSignature.SignDetached(appearance, externalSignature, new[] { bcCert }, null, null, null, 0, CryptoStandard.CMS);
 
-                    Console.WriteLine($"PDF signed successfully: {outputPath}");
+                 
                     LogToFile($"SUCCESS | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Signed '{inputPath}' to '{outputPath}'", outputFolderPath);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error while signing the PDF {inputPath}: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
+               
                 LogToFile($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}", outputFolderPath);
 
             }
-
-
         }
 
 
@@ -400,7 +391,7 @@ namespace DigiSign
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Failed to write to log file: " + ex.Message);
+                MessageBox.Show("Failed to write to log file: " + ex.Message);
             }
         }
 
