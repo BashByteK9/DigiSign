@@ -15,6 +15,7 @@ using System.Diagnostics;
 using Net.Pkcs11Interop.Common;
 using Net.Pkcs11Interop.HighLevelAPI;
 using Spire.Pdf.Graphics;
+using System.Security.AccessControl;
 
 namespace DigiSign
 {
@@ -79,7 +80,7 @@ namespace DigiSign
                         // Process each PDF file
                         foreach (string inputPdfPath in validPdfFiles)
                         {
-                            string inputFileName = Path.GetFileNameWithoutExtension(inputPdfPath);
+                            string inputFileName = Path.GetFileName(inputPdfPath);
                             string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
 
@@ -96,23 +97,23 @@ namespace DigiSign
                             }
                             catch (Exception ex)
                             {
-                                MessageBox.Show($"Error opening output folder: {ex.Message}");
+                                LogToFile($"Error opening output folder: {ex.Message}", outputFolderPath);
                             }
                         }
                     }
                     else
                     {
-                        MessageBox.Show("Certificate not found.");
+                        LogToFile($"Certificate not found {commonName}", outputFolderPath);
                     }
                 }
                 else
                 {
-                    MessageBox.Show("No valid PDF files found in the specified input paths.");
+                    LogToFile($"Error;File(s) Not Found", outputFolderPath); 
                 }
             }
             else
             {
-                MessageBox.Show("Invalid XML data: Missing required fields.");
+                LogToFile($"Error;Invalid XML data: Missing required fields.{xmlFilePath}", "");
             }
 
             
@@ -129,7 +130,7 @@ namespace DigiSign
                 var fileNameLists = envelope.Element("FILENAMELIST")?.Elements("FILENAMELIST").ToList();
                 if (fileNameLists == null || fileNameLists.Count < 10)
                 {
-                    MessageBox.Show("Invalid or incomplete XML structure.");
+                    LogToFile($"Error;Invalid or incomplete XML structure", "");
                     return null;
                 }
 
@@ -173,7 +174,7 @@ namespace DigiSign
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Error parsing XML: " + ex.Message);
+                LogToFile($"Error;parsing XML:{ex.Message}", "");
                 return null;
             }
         }
@@ -191,29 +192,17 @@ namespace DigiSign
 
                 if (certs.Count == 0)
                 {
-                    MessageBox.Show("No matching certificates found.");
+                    LogToFile($"Error;No matching certificates found.{commonName}", "");
                     return null;
                 }
 
                 var cert = certs[0];
-
-                // Attempt to access the private key to trigger PIN prompt
-                //try
-                //{
-                //    var privateKey = cert.PrivateKey;
-                //}
-                //catch (Exception ex)
-                //{
-                //    Console.WriteLine("Failed to access the private key. Ensure the USB token is inserted and unlocked.");
-                //    Console.WriteLine($"Details: {ex.Message}");
-                //    return null;
-                //}
                 cert.SetPinForPrivateKey(pin);
                 return cert;
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error loading certificate: {ex.Message}");
+                LogToFile($"Error; loading certificate::{commonName}", "");
                 return null;
             }
             finally
@@ -281,13 +270,13 @@ namespace DigiSign
 
                         if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
                         {
-                            MessageBox.Show($"Warning: Signature rectangle is outside page {page} boundaries. Adjusting coordinates.");
+                            LogToFile($"Error; Signature rectangle is outside page {page} boundaries. Adjusting coordinates", "");
                             adjustedX = Math.Max(50, x);
                             adjustedY = Math.Max(50, y);
                             adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
                             adjustedHeight = Math.Min(height, pageHeight - adjustedY - 50);
                         }
-                        Console.WriteLine($"Signature Rectangle on page {page}: x={adjustedX}, y={adjustedY}, width={adjustedWidth}, height={adjustedHeight}");
+                        //Console.WriteLine($"Signature Rectangle on page {page}: x={adjustedX}, y={adjustedY}, width={adjustedWidth}, height={adjustedHeight}");
 
                         // Define visible signature area for the current page
                         appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(adjustedX, adjustedY, adjustedX + adjustedWidth, adjustedY + adjustedHeight), page, $"sig_{page}");
@@ -386,7 +375,7 @@ namespace DigiSign
                     MakeSignature.SignDetached(appearance, externalSignature, new[] { bcCert }, null, null, null, 0, CryptoStandard.CMS);
 
                  
-                    LogToFile($"SUCCESS | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Signed '{inputPath}' to '{outputPath}'", outputFolderPath);
+                    LogToFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
                 }
             }
             catch (Exception ex)
@@ -402,9 +391,9 @@ namespace DigiSign
         {
             try
             {
-                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log.txt");
+                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
                 string logMessage = $"{message}";
-                File.AppendAllText(logFilePath, logMessage + Environment.NewLine);
+                File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
             }
             catch (Exception ex)
             {
