@@ -292,39 +292,58 @@ namespace DigiSign
                         BaseFont baseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for CN
                         BaseFont baseFontText = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for signature text
 
-                        float fontSizeCN = 12; // Slightly larger font size for CN
+                        float fontSizeCN = 10; // Slightly larger font size for CN
                         float fontSizeText = 9; // Regular font size for signature text
-                        float padding = 5;
+                        float padding = 3;
                         float maxTextWidth = adjustedWidth - 2 * padding;
-                        float leadingCN = fontSizeCN + 4; // Line spacing for CN
-                        float leadingText = fontSizeText + 2; // Line spacing for signature text
+                        float leadingCN = fontSizeCN + 3; // Line spacing for CN
+                        float leadingText = fontSizeText + 1; // Line spacing for signature text
                         float maxY = adjustedY + adjustedHeight - padding;
                         float minY = adjustedY + padding;
                         float currentY = maxY;
 
                         over.BeginText();
-                        // Draw CN
+                        // Draw CN with wrapping
                         over.SetFontAndSize(baseFontCN, fontSizeCN);
                         over.SetColorFill(BaseColor.BLACK);
                         string cnLine = cn.Trim();
                         if (!string.IsNullOrEmpty(cnLine))
                         {
-                            float cnWidth = baseFontCN.GetWidthPoint(cnLine, fontSizeCN);
-                            if (cnWidth <= maxTextWidth)
+                            List<string> wrappedCNLines = new List<string>();
+                            string[] words = cnLine.Split(' ');
+                            string currentLine = "";
+                            foreach (string word in words)
                             {
-                                over.ShowTextAligned(Element.ALIGN_LEFT, cnLine, adjustedX + padding, currentY, 0);
+                                string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
+                                float lineWidth = baseFontCN.GetWidthPoint(testLine, fontSizeCN);
+                                if (lineWidth <= maxTextWidth)
+                                {
+                                    currentLine = testLine;
+                                }
+                                else
+                                {
+                                    wrappedCNLines.Add(currentLine);
+                                    currentLine = word;
+                                }
+                            }
+                            if (!string.IsNullOrEmpty(currentLine))
+                                wrappedCNLines.Add(currentLine);
+
+                            foreach (string wrappedLine in wrappedCNLines)
+                            {
+                                if (currentY - leadingCN < minY) break;
+                                over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
                                 currentY -= leadingCN;
                             }
                         }
 
-                        // Draw signature text
+                        // Draw signature text (excluding the CN line)
                         over.SetFontAndSize(baseFontText, fontSizeText);
-                        foreach (string rawLine in signatureText.Split('\n'))
+                        foreach (string rawLine in signatureText.Split('\n').Skip(1)) // Skip the first line (CN)
                         {
                             string line = rawLine.Trim();
                             if (string.IsNullOrEmpty(line)) continue;
 
-                            // Break the line into smaller chunks if it exceeds the max width
                             List<string> wrappedLines = new List<string>();
                             string[] words = line.Split(' ');
                             string currentLine = "";
@@ -350,10 +369,9 @@ namespace DigiSign
                                 wrappedLines.Add(currentLine);
                             }
 
-                            // Render each wrapped line
                             foreach (string wrappedLine in wrappedLines)
                             {
-                                if (currentY - leadingText < minY) break; // Stop if there's no space left
+                                if (currentY - leadingText < minY) break;
                                 over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
                                 currentY -= leadingText;
                             }
