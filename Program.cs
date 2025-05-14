@@ -300,19 +300,36 @@ namespace DigiSign
                         over.SaveState();
 
                         // Draw text with wrapping
-                        BaseFont baseFont = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
-                        float fontSize = 9;
+                        BaseFont baseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for CN
+                        BaseFont baseFontText = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for signature text
+
+                        float fontSizeCN = 12; // Slightly larger font size for CN
+                        float fontSizeText = 9; // Regular font size for signature text
                         float padding = 5;
                         float maxTextWidth = adjustedWidth - 2 * padding;
-                        float leading = fontSize + 2; // Line spacing
+                        float leadingCN = fontSizeCN + 4; // Line spacing for CN
+                        float leadingText = fontSizeText + 2; // Line spacing for signature text
                         float maxY = adjustedY + adjustedHeight - padding;
                         float minY = adjustedY + padding;
                         float currentY = maxY;
 
                         over.BeginText();
-                        over.SetFontAndSize(baseFont, fontSize);
+                        // Draw CN
+                        over.SetFontAndSize(baseFontCN, fontSizeCN);
                         over.SetColorFill(BaseColor.BLACK);
+                        string cnLine = cn.Trim();
+                        if (!string.IsNullOrEmpty(cnLine))
+                        {
+                            float cnWidth = baseFontCN.GetWidthPoint(cnLine, fontSizeCN);
+                            if (cnWidth <= maxTextWidth)
+                            {
+                                over.ShowTextAligned(Element.ALIGN_LEFT, cnLine, adjustedX + padding, currentY, 0);
+                                currentY -= leadingCN;
+                            }
+                        }
 
+                        // Draw signature text
+                        over.SetFontAndSize(baseFontText, fontSizeText);
                         foreach (string rawLine in signatureText.Split('\n'))
                         {
                             string line = rawLine.Trim();
@@ -326,7 +343,7 @@ namespace DigiSign
                             foreach (string word in words)
                             {
                                 string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
-                                float lineWidth = baseFont.GetWidthPoint(testLine, fontSize);
+                                float lineWidth = baseFontText.GetWidthPoint(testLine, fontSizeText);
 
                                 if (lineWidth <= maxTextWidth)
                                 {
@@ -347,9 +364,9 @@ namespace DigiSign
                             // Render each wrapped line
                             foreach (string wrappedLine in wrappedLines)
                             {
-                                if (currentY - leading < minY) break; // Stop if there's no space left
+                                if (currentY - leadingText < minY) break; // Stop if there's no space left
                                 over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                                currentY -= leading;
+                                currentY -= leadingText;
                             }
                         }
 
