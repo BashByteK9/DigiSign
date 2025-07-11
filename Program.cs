@@ -16,6 +16,8 @@ using Net.Pkcs11Interop.Common;
 using Net.Pkcs11Interop.HighLevelAPI;
 using Spire.Pdf.Graphics;
 using System.Security.AccessControl;
+using System.Text;
+using System.Management;
 
 namespace DigiSign
 {
@@ -34,16 +36,60 @@ namespace DigiSign
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
     }
 
+    public class PdfSignatureValidator
+    {
+        public class SignatureValidationResult
+        {
+            public string SignatureName { get; set; }
+            public bool IsValid { get; set; }
+        }
+
+        public static List<SignatureValidationResult> ValidateSignatures(string pdfPath)
+        {
+            var results = new List<SignatureValidationResult>();
+
+            using (PdfReader reader = new PdfReader(pdfPath))
+            {
+                AcroFields af = reader.AcroFields;
+                var signatureNames = af.GetSignatureNames();
+
+                foreach (var name in signatureNames)
+                {
+                    PdfPKCS7 pkcs7 = af.VerifySignature(name);
+                    bool valid = pkcs7.Verify();
+
+                    results.Add(new SignatureValidationResult
+                    {
+                        SignatureName = name,
+                        IsValid = valid
+                    });
+                }
+            }
+
+            return results;
+        }
+    }
+
+
     internal class Program
     {
         [STAThread]
         static void Main(string[] args)
         {
+            System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
             string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             var xmlData = ReadXmlData(xmlFilePath);
             //string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
 
-            if (xmlData != null &&
+
+            //if (File.Exists(licensePath))
+            //{
+            //    if (ValidateLicense(licensePath))
+            //    {
+                    //Console.WriteLine("✅ License valid — Full Mode enabled.");
+
+                    if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
                 !string.IsNullOrEmpty(xmlData.OutputFolderPath) &&
                 !string.IsNullOrEmpty(xmlData.CommonName))
@@ -115,8 +161,93 @@ namespace DigiSign
             {
                 LogToFile($"Error;Invalid XML data: Missing required fields.{xmlFilePath}", "");
             }
+                }
+        //        else
+        //        {
+        //            Console.WriteLine("License invalid or used on a different device — Demo Mode enabled.");
+        //            // Restrict to demo features
+        //        }
+        //    }
+        //    else
+        //    {
+        //        Console.WriteLine("Looking for license at: " + licensePath);
+        //        Console.WriteLine("License file not found — Demo Mode enabled.");
+        //        // Restrict to demo features
+        //    }
 
-            
+        //}
+
+        static bool ValidateLicense(string filePath)
+        {
+            var lines = File.ReadAllLines(filePath);
+            var licenseData = lines.Select(line => line.Split('=')).ToDictionary(parts => parts[0], parts => parts[1]);
+
+            string storedDeviceId = licenseData["DeviceID"];
+            string storedHash = licenseData["DeviceHash"];
+            string licenseNumber = licenseData["LicenseNumber"];
+            string validUntil = licenseData["ValidUntil"];
+
+            string currentDeviceId = GetDeviceId();
+
+            if (storedDeviceId != currentDeviceId)
+            {
+                Console.WriteLine("Device mismatch.");
+                return false;
+            }
+
+            string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
+            if (computedHash != storedHash)
+            {
+                Console.WriteLine("Device hash mismatch.");
+                return false;
+            }
+
+            if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
+            {
+                Console.WriteLine("License expired.");
+                return false;
+            }
+
+            return true;
+        }
+
+        static string GenerateDeviceHash(string deviceId, string licenseNumber)
+        {
+            string data = deviceId + "|" + licenseNumber;
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
+                return BitConverter.ToString(hash).Replace("-", "");
+            }
+        }
+
+        static string GetDeviceId()
+        {
+            try
+            {
+                string cpuId = "";
+                string diskId = "";
+
+                var cpuSearcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor");
+                foreach (var obj in cpuSearcher.Get())
+                {
+                    cpuId = obj["ProcessorId"]?.ToString();
+                    break;
+                }
+
+                var diskSearcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_DiskDrive");
+                foreach (var obj in diskSearcher.Get())
+                {
+                    diskId = obj["SerialNumber"]?.ToString();
+                    break;
+                }
+
+                return $"{cpuId}_{diskId}";
+            }
+            catch
+            {
+                return "UNKNOWN_DEVICE";
+            }
         }
 
         static XmlData ReadXmlData(string xmlFilePath)
@@ -252,7 +383,9 @@ namespace DigiSign
                 {
                     PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
                     PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+                    appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
                     appearance.Reason = "Digitally signed";
+                    appearance.Acro6Layers = false;
 
                     // Sign each specified page
                     foreach (int page in pagesToSign)
@@ -337,6 +470,41 @@ namespace DigiSign
                             }
                         }
 
+                        // Path to your check mark image
+                        //string checkmarkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "checkmark.png");
+                        //if (File.Exists(checkmarkPath))
+                        //{
+                        //    iTextSharp.text.Image checkImg = iTextSharp.text.Image.GetInstance(checkmarkPath);
+
+                        //    // Original image dimensions
+                        //    float originalWidth = checkImg.Width;
+                        //    float originalHeight = checkImg.Height;
+
+                        //    // Target box dimensions
+                        //    float maxWidth = adjustedWidth * 0.7f;
+                        //    float maxHeight = adjustedHeight * 0.7f;
+
+                        //    // Calculate scale ratio
+                        //    float widthRatio = maxWidth / originalWidth;
+                        //    float heightRatio = maxHeight / originalHeight;
+                        //    float scale = Math.Min(widthRatio, heightRatio); // Preserve aspect ratio
+
+                        //    // Scaled image size
+                        //    float imgWidth = originalWidth * scale;
+                        //    float imgHeight = originalHeight * scale;
+
+                        //    // Center the image inside the signature box
+                        //    float imgX = adjustedX + (adjustedWidth - imgWidth) / 2;
+                        //    float imgY = adjustedY + (adjustedHeight - imgHeight) / 2;
+
+                        //    checkImg.ScaleAbsolute(imgWidth, imgHeight);
+                        //    checkImg.SetAbsolutePosition(imgX, imgY);
+                        //    checkImg.Alignment = iTextSharp.text.Image.UNDERLYING;
+
+                        //    over.AddImage(checkImg);
+                        //}
+
+
                         // Draw signature text (excluding the CN line)
                         over.SetFontAndSize(baseFontText, fontSizeText);
                         foreach (string rawLine in signatureText.Split('\n').Skip(1)) // Skip the first line (CN)
@@ -390,9 +558,34 @@ namespace DigiSign
                     Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
 
                     // Sign the document
-                    MakeSignature.SignDetached(appearance, externalSignature, new[] { bcCert }, null, null, null, 0, CryptoStandard.CMS);
+                    var ocspClient = new OcspClientBouncyCastle();
+                    ITSAClient tsaClient = null;
 
-                 
+                    try
+                    {
+                        tsaClient = new TSAClientBouncyCastle("http://timestamp.digicert.com");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogToFile($"Warning: TSA not available, proceeding without timestamp. {ex.Message}", outputFolderPath);
+                        // You can continue signing without timestamp
+                    }
+
+
+
+                    MakeSignature.SignDetached(
+                        appearance,
+                        externalSignature,
+                        new[] { bcCert },
+                        null,                // or a CRL list if needed
+                        ocspClient,
+                        tsaClient,
+                        0,
+                        CryptoStandard.CMS
+                    );
+
+
+
                     LogToFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
                 }
             }
