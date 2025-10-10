@@ -7,7 +7,7 @@
 			<FILENAME>C:\Users\Public</FILENAME>
 		</FILENAMELIST>
 		<FILENAMELIST>
-			<FILENAME>VINODKUMAR RAMCHANDRAN PILLAI</FILENAME>
+			<FILENAME>Arvind</FILENAME>
 		</FILENAMELIST>
 		<FILENAMELIST>
 			<FILENAME>123456789</FILENAME>
@@ -33,10 +33,8 @@
 			<!-- Open Output folder after signing: Y=output folder will be open after signing, N=Output folder will not open after signing, default value=Y -->
 		</FILENAMELIST>
 		<FILENAMELIST>
-			<FILENAME>C:\Users\Public\signingcert.pfx</FILENAME>
-		</FILENAMELIST>
-		<FILENAMELIST>
-			<FILENAME>lmao</FILENAME>
+			<FILENAME>Y</FILENAME>
+			<!-- USESELFSIGNED -->
 		</FILENAMELIST>
 	</FILENAMELIST>
 </ENVELOPE>

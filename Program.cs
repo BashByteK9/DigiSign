@@ -34,8 +34,7 @@ namespace DigiSign
         public float Height { get; set; }
         public string SignOnPage { get; set; } // F=First, E=Each, L=Last
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
-        public string SelfSignedPath { get; set; }
-        public string SelfSignedPassword { get; set; }
+        public bool UseSelfSigned { get; set; } = false;
 
     }
 
@@ -304,13 +303,12 @@ namespace DigiSign
                 // 9: Open output folder
                 xmlData.OpenOutputFolder = fileNameLists[9].Element("FILENAME")?.Value.Trim() ?? "Y";
 
-                // 10: Self-signed certificate path
+                // Optional index 10: USESELFSIGNED flag
                 if (fileNameLists.Count > 10)
-                    xmlData.SelfSignedPath = fileNameLists[10].Element("FILENAME")?.Value.Trim();
-
-                // 11: Self-signed certificate password
-                if (fileNameLists.Count > 11)
-                    xmlData.SelfSignedPassword = fileNameLists[11].Element("FILENAME")?.Value.Trim();
+                {
+                    string flag = fileNameLists[10].Element("FILENAME")?.Value.Trim().ToUpper();
+                    xmlData.UseSelfSigned = (flag == "Y");
+                }
 
 
                 return xmlData;
@@ -322,49 +320,120 @@ namespace DigiSign
             }
         }
 
-        static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin, XmlData xmlData)
+        static bool CertificateMatchesCN(X509Certificate2 cert, string commonName)
         {
-            X509Store store = new X509Store(StoreLocation.CurrentUser);
+            // Extract CN part from the subject
+            var cnPart = cert.Subject
+                .Split(',')
+                .Select(p => p.Trim())
+                .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))?
+                .Substring(3);
 
-            try
-            {
-                store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-                var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
-
-                if (certs.Count > 0)
-                {
-                    var cert = certs[0];
-                    cert.SetPinForPrivateKey(pin);
-                    return cert;
-                }
-
-                // ⚙️ No token found → try self-signed fallback
-                if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
-                {
-                    LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
-                    return new X509Certificate2(
-                        xmlData.SelfSignedPath,
-                        xmlData.SelfSignedPassword,
-                        X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet
-                    );
-                }
-
-                // ❌ Nothing found
-                LogToFile($"Error;No USB token certificate or self-signed fallback found for {commonName}", "");
-                return null;    
-            }
-            catch (Exception ex)
-            {
-                LogToFile($"Error; loading certificate::{commonName}::{ex.Message}", "");
-                return null;
-            }
-            finally
-            {
-                store.Close();
-            }
+            return string.Equals(cnPart, commonName, StringComparison.OrdinalIgnoreCase);
         }
 
+        static X509Certificate2 GetCertificate(string commonName)
+        {
+            using (var store = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+            {
+                store.Open(OpenFlags.ReadOnly);
+                var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
+                if (certs.Count > 0)
+                    return certs[0];
+            }
+            return null;
+        }
 
+        static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin, XmlData xmlData)
+        {
+            X509Store[] stores = new X509Store[]
+            {
+        new X509Store(StoreName.My, StoreLocation.CurrentUser),
+        new X509Store(StoreName.My, StoreLocation.LocalMachine)
+            };
+
+            foreach (var store in stores)
+            {
+                try
+                {
+                    LogToFile($"DEBUG;Searching certificates in {store.Location} \\ {store.Name} store...", "");
+                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+
+                    // Step 1: Try USB token certificate first
+                    var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
+                    foreach (var cert in certs.Cast<X509Certificate2>())
+                    {
+                        LogToFile($"DEBUG;Certificate found: Subject={cert.Subject}, Issuer={cert.Issuer}, HasPrivateKey={cert.HasPrivateKey}", "");
+
+                        if (CertificateMatchesCN(cert, commonName))
+                        {
+                            if (cert.HasPrivateKey)
+                            {
+                                try
+                                {
+                                    using (var rsa = cert.GetRSAPrivateKey())
+                                    {
+                                        if (rsa is RSACryptoServiceProvider rsaCsp && rsaCsp.CspKeyContainerInfo.HardwareDevice)
+                                        {
+                                            cert.SetPinForPrivateKey(pin);
+                                            LogToFile($"Info;PIN forced for hardware token certificate.", "");
+                                        }
+                                        else
+                                        {
+                                            LogToFile($"Info;Certificate has private key, but not hardware token. No PIN forced.", "");
+                                        }
+                                    }
+                                }
+                                catch (CryptographicException ex)
+                                {
+                                    LogToFile($"Warning;Unable to access private key safely: {ex.Message}", "");
+                                }
+                            }
+
+                            LogToFile($"Info;Certificate matched CN='{commonName}': {cert.Subject}", "");
+                            return cert;
+                        }
+
+
+                        // Step 2: Check self-signed certificate if allowed
+                        else if (xmlData.UseSelfSigned)
+                        {
+                            var selfSignedCert = store.Certificates
+                                .Cast<X509Certificate2>()
+                                .FirstOrDefault(c =>
+                                    c.Subject == c.Issuer &&
+                                    CertificateMatchesCN(c, commonName));
+
+                            if (selfSignedCert != null)
+                            {
+                                LogToFile($"Info;Selected self-signed certificate: {selfSignedCert.Subject}", "");
+                                return selfSignedCert;
+                            }
+                            else
+                            {
+                                LogToFile($"Warning;No matching self-signed certificate found in this store.", "");
+                            }
+                        }
+                        else
+                        {
+                            LogToFile($"Info;Self-signed certificate selection disabled.", "");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogToFile($"Error;Failed to open {store.Location}\\{store.Name} store: {ex.Message}", "");
+                }
+                finally
+                {
+                    store.Close();
+                }
+            }
+
+            // Not found
+            LogToFile($"Error;No certificate found for CN='{commonName}' in any store.", "");
+            return null;
+        }
         static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
         {
             try
@@ -625,14 +694,15 @@ namespace DigiSign
             try
             {
                 string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-                string logMessage = $"{message}";
-                File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
+                string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {message}";
+                File.AppendAllText(logFilePath, logMessage + Environment.NewLine);
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Failed to write to log file: " + ex.Message);
             }
         }
+
 
 
 
