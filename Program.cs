@@ -34,6 +34,9 @@ namespace DigiSign
         public float Height { get; set; }
         public string SignOnPage { get; set; } // F=First, E=Each, L=Last
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
+        public string SelfSignedPath { get; set; }
+        public string SelfSignedPassword { get; set; }
+
     }
 
     public class PdfSignatureValidator
@@ -119,7 +122,7 @@ namespace DigiSign
                 if (validPdfFiles.Any())
                 {
                     //MessageBox.Show($"Found {validPdfFiles.Count} valid PDF files.");
-                    var cert = LoadCertificateFromUSBToken(commonName, pin);
+                    var cert = LoadCertificateFromUSBToken(commonName, pin, xmlData);
 
                     if (cert != null)
                     {
@@ -301,6 +304,15 @@ namespace DigiSign
                 // 9: Open output folder
                 xmlData.OpenOutputFolder = fileNameLists[9].Element("FILENAME")?.Value.Trim() ?? "Y";
 
+                // 10: Self-signed certificate path
+                if (fileNameLists.Count > 10)
+                    xmlData.SelfSignedPath = fileNameLists[10].Element("FILENAME")?.Value.Trim();
+
+                // 11: Self-signed certificate password
+                if (fileNameLists.Count > 11)
+                    xmlData.SelfSignedPassword = fileNameLists[11].Element("FILENAME")?.Value.Trim();
+
+
                 return xmlData;
             }
             catch (Exception ex)
@@ -310,7 +322,7 @@ namespace DigiSign
             }
         }
 
-    static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin)
+        static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin, XmlData xmlData)
         {
             X509Store store = new X509Store(StoreLocation.CurrentUser);
 
@@ -319,21 +331,31 @@ namespace DigiSign
                 store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
                 var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
 
-    
-
-                if (certs.Count == 0)
+                if (certs.Count > 0)
                 {
-                    LogToFile($"Error;No matching certificates found.{commonName}", "");
-                    return null;
+                    var cert = certs[0];
+                    cert.SetPinForPrivateKey(pin);
+                    return cert;
                 }
 
-                var cert = certs[0];
-                cert.SetPinForPrivateKey(pin);
-                return cert;
+                // ⚙️ No token found → try self-signed fallback
+                if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
+                {
+                    LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
+                    return new X509Certificate2(
+                        xmlData.SelfSignedPath,
+                        xmlData.SelfSignedPassword,
+                        X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet
+                    );
+                }
+
+                // ❌ Nothing found
+                LogToFile($"Error;No USB token certificate or self-signed fallback found for {commonName}", "");
+                return null;    
             }
             catch (Exception ex)
             {
-                LogToFile($"Error; loading certificate::{commonName}", "");
+                LogToFile($"Error; loading certificate::{commonName}::{ex.Message}", "");
                 return null;
             }
             finally
@@ -343,7 +365,7 @@ namespace DigiSign
         }
 
 
-    static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
+        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
         {
             try
             {
