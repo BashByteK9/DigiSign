@@ -689,19 +689,21 @@ namespace DigiSign
         }
 
 
-        static void LogToFile(string message, string outputFolderPath)
-        {
-            try
-            {
-                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-                string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {message}";
-                File.AppendAllText(logFilePath, logMessage + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Failed to write to log file: " + ex.Message);
-            }
-        }
+       static void LogToFile(string message, string outputfolderpath)
+{
+    try
+    {
+        string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
+        string logMessage = $"{message}";
+
+        // Overwrite the file on each call
+        File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
+    }
+    catch (Exception ex)
+    {
+        MessageBox.Show("Failed to write to log file: " + ex.Message);
+    }
+}
 
 
 
