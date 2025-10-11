@@ -677,34 +677,55 @@ namespace DigiSign
 
 
 
-                    LogToFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
+                    LogToPlfFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
                 }
             }
             catch (Exception ex)
             {
                
-                LogToFile($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}", outputFolderPath);
+                LogToPlfFile($"ERROR Failed to sign '{Path.GetFileName(inputPath)}'. Exception: {ex.Message}", outputFolderPath);
 
             }
         }
 
 
-       static void LogToFile(string message, string outputfolderpath)
-{
-    try
+    static void LogToPlfFile(string message, string outputFolderPath)
     {
-        string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-        string logMessage = $"{message}";
-
-        // Overwrite the file on each call
-        File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
+        try
+        {
+            string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
+            string logMessage = $"{message}";
+        
+            File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Failed to write to log file: " + ex.Message);
+        }
     }
-    catch (Exception ex)
-    {
-        MessageBox.Show("Failed to write to log file: " + ex.Message);
-    }
-}
 
+        static readonly string LogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "application_log.txt");
+        static bool logInitialized = false;
+
+        static void LogToFile(string message, string outputFolderPath)
+        {
+            try
+            {
+                // Reset log file only once at program start
+                if (!logInitialized)
+                {
+                    File.WriteAllText(LogFilePath, string.Empty); // Clear file
+                    logInitialized = true;
+                }
+
+                string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {message}";
+                File.AppendAllText(LogFilePath, logMessage + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to write to log file: " + ex.Message);
+            }
+        }
 
 
 
