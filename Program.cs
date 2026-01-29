@@ -73,50 +73,293 @@ namespace DigiSign
     }
 
 
+
+    public enum LogLevel
+    {
+        DEBUG,
+        INFO,
+        WARNING,
+        ERROR,
+        CRITICAL
+    }
+
+    public static class Logger
+    {
+        private static readonly string LogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "application_log.txt");
+        private static readonly string PlfLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
+        private static bool logInitialized = false;
+        private static readonly object logLock = new object();
+
+        public static void Initialize()
+        {
+            lock (logLock)
+            {
+                if (!logInitialized)
+                {
+                    try
+                    {
+                        // Create log header
+                        var header = new StringBuilder();
+                        header.AppendLine("═══════════════════════════════════════════════════════════");
+                        header.AppendLine($"DigiSign Application Log - Session Started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                        header.AppendLine($"Application Path: {AppDomain.CurrentDomain.BaseDirectory}");
+                        header.AppendLine($"Machine: {Environment.MachineName} | User: {Environment.UserName}");
+                        header.AppendLine($"OS: {Environment.OSVersion} | .NET: {Environment.Version}");
+                        header.AppendLine("═══════════════════════════════════════════════════════════");
+                        header.AppendLine();
+
+                        File.WriteAllText(LogFilePath, header.ToString());
+                        logInitialized = true;
+                        
+                        Log(LogLevel.INFO, "Logger initialized successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Failed to initialize logger: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        public static void Log(LogLevel level, string message, Exception ex = null)
+        {
+            try
+            {
+                if (!logInitialized)
+                    Initialize();
+
+                lock (logLock)
+                {
+                    var logEntry = new StringBuilder();
+                    logEntry.Append($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    logEntry.Append($" | {level,-8}");
+                    logEntry.Append($" | {message}");
+
+                    if (ex != null)
+                    {
+                        logEntry.AppendLine();
+                        logEntry.Append($"{"",23} | Exception: {ex.GetType().Name} - {ex.Message}");
+                        if (!string.IsNullOrEmpty(ex.StackTrace))
+                        {
+                            logEntry.AppendLine();
+                            logEntry.Append($"{"",23} | StackTrace: {ex.StackTrace.Replace(Environment.NewLine, Environment.NewLine + new string(' ', 23) + " | ")}");
+                        }
+                    }
+
+                    File.AppendAllText(LogFilePath, logEntry.ToString() + Environment.NewLine);
+
+                    // Also write to console for ERROR and CRITICAL
+                    if (level == LogLevel.ERROR || level == LogLevel.CRITICAL)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[{level}] {message}");
+                        if (ex != null)
+                            Console.WriteLine($"  → {ex.Message}");
+                        Console.ResetColor();
+                    }
+                    else if (level == LogLevel.WARNING)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[{level}] {message}");
+                        Console.ResetColor();
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fail to avoid breaking the application
+            }
+        }
+
+        public static void Debug(string message) => Log(LogLevel.DEBUG, message);
+        public static void Info(string message) => Log(LogLevel.INFO, message);
+        public static void Warning(string message) => Log(LogLevel.WARNING, message);
+        public static void Error(string message, Exception ex = null) => Log(LogLevel.ERROR, message, ex);
+        public static void Critical(string message, Exception ex = null) => Log(LogLevel.CRITICAL, message, ex);
+
+        public static void LogToPlf(string message, bool isError = false)
+        {
+            try
+            {
+                lock (logLock)
+                {
+                    // Write only the message to PLF file (no timestamp, no status prefix)
+                    File.WriteAllText(PlfLogFilePath, message + Environment.NewLine);
+                    
+                    // Still log to application log with full details
+                    if (isError)
+                        Error($"PLF Log: {message}");
+                    else
+                        Info($"PLF Log: {message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Error("Failed to write to PLF log file", ex);
+            }
+        }
+
+        public static void LogSeparator()
+        {
+            try
+            {
+                if (!logInitialized)
+                    Initialize();
+
+                lock (logLock)
+                {
+                    File.AppendAllText(LogFilePath, new string('-', 80) + Environment.NewLine);
+                }
+            }
+            catch
+            {
+                // Silently fail
+            }
+        }
+    }
+
     internal class Program
     {
         [STAThread]
         static void Main(string[] args)
         {
+            // Initialize logger first
+            Logger.Initialize();
+            Logger.Info("Application started");
+            Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
+            // Initialize logger first
+            Logger.Initialize();
+            Logger.Info("Application started");
+            Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
+
             System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
             string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
             string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
+            
+            Logger.Debug($"License file path: {licensePath}");
+            Logger.Debug($"XML configuration file path: {xmlFilePath}");
+            
             var xmlData = ReadXmlData(xmlFilePath);
             bool isDemoMode = false;
+
+            Logger.LogSeparator();
+            Logger.Info("Starting license validation");
 
             // Check license
             if (File.Exists(licensePath))
             {
+                Logger.Info($"License file found at: {licensePath}");
                 if (ValidateLicense(licensePath))
                 {
                     Console.WriteLine("✅ License valid — Full Mode enabled.");
+                    Logger.Info("License validation successful - Full Mode enabled");
                 }
                 else
                 {
                     Console.WriteLine("❌ License invalid or used on a different device — Demo Mode enabled.");
+                    Logger.Warning("License validation failed - Demo Mode enabled");
+                    string licenseKeyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.key");
+                    GenerateLicenseKeyFile(licenseKeyPath);
                     isDemoMode = true;
                 }
             }
             else
             {
                 Console.WriteLine("⚠️ License file not found — Demo Mode enabled.");
-                Console.WriteLine("Looking for license at: " + licensePath);
-                string deviceId = GetDeviceId();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("Device License Key (required for activation):");
-                Console.WriteLine(deviceId);
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("Please use this Device License Key with the external license");
-                Console.WriteLine("application to generate your license file.");
-                Console.WriteLine();
+                Logger.Info("License file not found - Demo Mode enabled");
+                string licenseKeyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.key");
+                GenerateLicenseKeyFile(licenseKeyPath);
                 isDemoMode = true;
             }
 
+            Logger.Info($"Application mode: {(isDemoMode ? "DEMO" : "FULL")}");
+            
+            if (isDemoMode)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("╔═══════════════════════════════════════════════════════════╗");
+                Console.WriteLine("║               RUNNING IN DEMO MODE                        ║");
+                Console.WriteLine("║   PDFs will NOT be digitally signed.                      ║");
+                Console.WriteLine("║   Only visual demo text will be added (no signer name).   ║");
+                Console.WriteLine("╚═══════════════════════════════════════════════════════════╝");
+                Console.ResetColor();
+                Console.WriteLine();
+            }
+            
+            Logger.LogSeparator();
+
+            // Check if admin wants to generate license.txt from license.key
+            // Only prompt if there are command line arguments indicating admin mode
+            string adminLicensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "admin.license");
+            if (args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase) && 
+                File.Exists(adminLicensePath) && ValidateAdminLicense(adminLicensePath))
+            {
+                Logger.Info("Admin mode activated");
+                Console.WriteLine();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("🔑 Admin License Mode");
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("Do you want to generate license.txt from a license.key file? (Y/N)");
+                string response = Console.ReadLine()?.Trim().ToUpper();
+                Logger.Debug($"Admin response: {response}");
+                
+                if (response == "Y")
+                {
+                    Console.Write("Enter the path to license.key file: ");
+                    string userLicenseKeyPath = Console.ReadLine()?.Trim();
+                    Logger.Debug($"License key path provided: {userLicenseKeyPath}");
+                    
+                    if (!string.IsNullOrEmpty(userLicenseKeyPath) && File.Exists(userLicenseKeyPath))
+                    {
+                        if (GenerateLicenseFromKey(userLicenseKeyPath))
+                        {
+                            Console.WriteLine("✅ License file generated successfully!");
+                            Logger.Info($"License file generated successfully from: {userLicenseKeyPath}");
+                        }
+                        else
+                        {
+                            Console.WriteLine("❌ Failed to generate license file.");
+                            Logger.Error("Failed to generate license file");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ License key file not found.");
+                        Logger.Error($"License key file not found: {userLicenseKeyPath}");
+                    }
+                    Console.WriteLine();
+                }
+                
+                // Exit after admin operations
+                Logger.Info("Exiting admin mode");
+                Logger.Info("Application ended");
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+                return;
+            }
+            else if (File.Exists(adminLicensePath) && ValidateAdminLicense(adminLicensePath))
+            {
+                Console.WriteLine("💡 Admin license detected. Run with /admin flag to generate licenses.");
+                Console.WriteLine("   Example: DigiSign.exe /admin");
+                Console.WriteLine();
+                Logger.Info("Admin license detected but not running in admin mode");
+            }
+
+
+            Logger.LogSeparator();
+            Logger.Info("Starting PDF processing");
+            
             if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
                 !string.IsNullOrEmpty(xmlData.OutputFolderPath) &&
                 !string.IsNullOrEmpty(xmlData.CommonName))
             {
+                Logger.Info("XML configuration validated successfully");
+                Logger.Debug($"Input files count: {xmlData.InputFilePaths.Count}");
+                Logger.Debug($"Output folder: {xmlData.OutputFolderPath}");
+                Logger.Debug($"Certificate CN: {xmlData.CommonName}");
+                
                 string outputFolderPath = xmlData.OutputFolderPath;
                 string commonName = xmlData.CommonName;
                 string pin = xmlData.Pin;
@@ -127,10 +370,13 @@ namespace DigiSign
                 string signOnPage = xmlData.SignOnPage ?? "L"; // Default to Last page
                 string openOutputFolder = xmlData.OpenOutputFolder ?? "Y"; // Default to Yes
 
+                Logger.Debug($"Signature coordinates: X={xCoord}, Y={yCoord}, Width={width}, Height={height}");
+                Logger.Debug($"Sign on page: {signOnPage}");
 
                 // Ensure output folder exists
                 if (!Directory.Exists(outputFolderPath))
                 {
+                    Logger.Info($"Creating output folder: {outputFolderPath}");
                     Directory.CreateDirectory(outputFolderPath);
                 }
 
@@ -139,57 +385,102 @@ namespace DigiSign
                     .Where(file => File.Exists(file) && Path.GetExtension(file).ToLower() == ".pdf")
                     .ToList();
 
+                Logger.Info($"Valid PDF files found: {validPdfFiles.Count} out of {xmlData.InputFilePaths.Count}");
+
                 if (validPdfFiles.Any())
                 {
-                    //MessageBox.Show($"Found {validPdfFiles.Count} valid PDF files.");
+                    Logger.Info($"Loading certificate: {commonName}");
                     var cert = LoadCertificateFromUSBToken(commonName, pin, xmlData);
 
                     if (cert != null)
                     {
+                        Logger.Info("Certificate loaded successfully");
+                        Logger.Debug($"Certificate Subject: {cert.Subject}");
+                        Logger.Debug($"Certificate Thumbprint: {cert.Thumbprint}");
+                        Logger.Debug($"Certificate Expiry: {cert.NotAfter:yyyy-MM-dd}");
+                        
                         // Process each PDF file
+                        int successCount = 0;
+                        int failCount = 0;
+                        
                         foreach (string inputPdfPath in validPdfFiles)
                         {
+                            Logger.LogSeparator();
+                            Logger.Info($"Processing PDF: {Path.GetFileName(inputPdfPath)}");
+                            
                             string inputFileName = Path.GetFileName(inputPdfPath);
                             string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
 
-                            SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath, isDemoMode);
+                            try
+                            {
+                                SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath, isDemoMode);
+                                successCount++;
+                                Logger.Info($"Successfully signed: {inputFileName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                failCount++;
+                                Logger.Error($"Failed to sign: {inputFileName}", ex);
+                            }
                         }
+
+                        Logger.LogSeparator();
+                        Logger.Info($"PDF signing completed - Success: {successCount}, Failed: {failCount}");
 
                         // Open output folder if specified
                         if (openOutputFolder.Equals("Y", StringComparison.OrdinalIgnoreCase))
                         {
                             try
                             {
+                                Logger.Debug($"Opening output folder: {outputFolderPath}");
                                 Process.Start("explorer.exe", outputFolderPath);
-
+                                Logger.Info("Output folder opened successfully");
                             }
                             catch (Exception ex)
                             {
-                                LogToFile($"Error opening output folder: {ex.Message}", outputFolderPath);
+                                Logger.Error($"Error opening output folder: {outputFolderPath}", ex);
                             }
                         }
                     }
                     else
                     {
-                        LogToFile($"Certificate not found {commonName}", outputFolderPath);
+                        Logger.Error($"Certificate not found: {commonName}");
+                        Logger.LogToPlf($"Certificate not found: {commonName}", isError: true);
                     }
                 }
                 else
                 {
-                    LogToFile($"Error;File(s) Not Found", outputFolderPath); 
+                    Logger.Error("No valid PDF files found");
+                    Logger.LogToPlf("Error: No valid PDF files found", isError: true);
                 }
             }
             else
             {
-                LogToFile($"Error;Invalid XML data: Missing required fields.{xmlFilePath}", "");
+                Logger.Error($"Invalid XML configuration in: {xmlFilePath}");
+                if (xmlData == null)
+                    Logger.Error("XML data is null - file may be missing or corrupted");
+                else
+                {
+                    if (!xmlData.InputFilePaths.Any())
+                        Logger.Error("No input file paths specified");
+                    if (string.IsNullOrEmpty(xmlData.OutputFolderPath))
+                        Logger.Error("Output folder path is missing");
+                    if (string.IsNullOrEmpty(xmlData.CommonName))
+                        Logger.Error("Certificate common name is missing");
+                }
+                Logger.LogToPlf($"Error: Invalid XML data in {xmlFilePath}", isError: true);
             }
+            
+            Logger.LogSeparator();
+            Logger.Info("Application completed");
         }
 
         static bool ValidateLicense(string filePath)
         {
             try
             {
+                Logger.Debug("Starting license validation");
                 var lines = File.ReadAllLines(filePath);
                 var licenseData = new Dictionary<string, string>();
                 
@@ -211,7 +502,7 @@ namespace DigiSign
                     !licenseData.ContainsKey("LicenseNumber") || 
                     !licenseData.ContainsKey("ValidUntil"))
                 {
-                    Console.WriteLine("License file is missing required fields.");
+                    Logger.Warning("License file is missing required fields");
                     return false;
                 }
 
@@ -220,42 +511,48 @@ namespace DigiSign
                 string licenseNumber = licenseData["LicenseNumber"];
                 string validUntil = licenseData["ValidUntil"];
 
+                Logger.Debug($"License Number: {licenseNumber}");
+                Logger.Debug($"Valid Until: {validUntil}");
+                Logger.Debug($"Stored Device ID: {storedDeviceId}");
+
                 // Validate that required values are not empty
                 if (string.IsNullOrWhiteSpace(storedDeviceId) || 
                     string.IsNullOrWhiteSpace(storedHash) || 
                     string.IsNullOrWhiteSpace(licenseNumber) || 
                     string.IsNullOrWhiteSpace(validUntil))
                 {
-                    Console.WriteLine("License file contains empty required fields.");
+                    Logger.Warning("License file contains empty required fields");
                     return false;
                 }
 
                 string currentDeviceId = GetDeviceId();
+                Logger.Debug($"Current Device ID: {currentDeviceId}");
 
                 if (storedDeviceId != currentDeviceId)
                 {
-                    Console.WriteLine("Device mismatch.");
+                    Logger.Warning("Device mismatch - license is for a different device");
                     return false;
                 }
 
                 string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
                 if (computedHash != storedHash)
                 {
-                    Console.WriteLine("Device hash mismatch.");
+                    Logger.Warning("Device hash mismatch - license may be tampered");
                     return false;
                 }
 
                 if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
                 {
-                    Console.WriteLine("License expired.");
+                    Logger.Warning($"License expired. Expiry date: {validUntil}");
                     return false;
                 }
 
+                Logger.Info("License validation successful");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error validating license: {ex.Message}");
+                Logger.Error("Error validating license", ex);
                 return false;
             }
         }
@@ -299,18 +596,267 @@ namespace DigiSign
             }
         }
 
+        static void GenerateLicenseKeyFile(string licenseKeyPath)
+        {
+            try
+            {
+                if (File.Exists(licenseKeyPath))
+                {
+                    Logger.Info($"License key file already exists at: {licenseKeyPath}");
+                    Console.WriteLine($"📄 License key file already exists at: {licenseKeyPath}");
+                    return;
+                }
+
+                Logger.Info("Generating license key file");
+                string deviceId = GetDeviceId();
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                string machineName = Environment.MachineName;
+                string userName = Environment.UserName;
+
+                Logger.Debug($"Device ID: {deviceId}");
+                Logger.Debug($"Machine Name: {machineName}");
+                Logger.Debug($"User Name: {userName}");
+
+                var keyContent = new StringBuilder();
+                keyContent.AppendLine("# License Key File");
+                keyContent.AppendLine("# Share this file with your administrator to generate a license");
+                keyContent.AppendLine();
+                keyContent.AppendLine($"DeviceID={deviceId}");
+                keyContent.AppendLine($"MachineName={machineName}");
+                keyContent.AppendLine($"UserName={userName}");
+                keyContent.AppendLine($"GeneratedOn={timestamp}");
+
+                File.WriteAllText(licenseKeyPath, keyContent.ToString());
+                Logger.Info($"License key file created successfully: {licenseKeyPath}");
+
+                Console.WriteLine();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("📄 License Key File Generated");
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine($"Location: {licenseKeyPath}");
+                Console.WriteLine($"Device ID: {deviceId}");
+                Console.WriteLine();
+                Console.WriteLine("Please share the license.key file with your administrator");
+                Console.WriteLine("to generate a valid license.txt file.");
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error generating license key file", ex);
+                Console.WriteLine($"Error generating license key file: {ex.Message}");
+            }
+        }
+
+        static bool ValidateAdminLicense(string adminLicensePath)
+        {
+            try
+            {
+                Logger.Debug("Validating admin license");
+                var lines = File.ReadAllLines(adminLicensePath);
+                var adminData = new Dictionary<string, string>();
+
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+                    
+                    var parts = line.Split(new[] { '=' }, 2);
+                    if (parts.Length == 2)
+                    {
+                        adminData[parts[0].Trim()] = parts[1].Trim();
+                    }
+                }
+
+                // Check required fields
+                if (!adminData.ContainsKey("AdminID") || 
+                    !adminData.ContainsKey("AdminKey") || 
+                    !adminData.ContainsKey("ValidUntil"))
+                {
+                    Logger.Warning("Admin license missing required fields");
+                    return false;
+                }
+
+                Logger.Debug($"Admin ID: {adminData["AdminID"]}");
+                Logger.Debug($"Valid Until: {adminData["ValidUntil"]}");
+
+                // Validate expiration
+                if (DateTime.TryParse(adminData["ValidUntil"], out var validDate) && validDate < DateTime.Now)
+                {
+                    Logger.Warning($"Admin license expired on: {validDate:yyyy-MM-dd}");
+                    Console.WriteLine("⚠️ Admin license has expired.");
+                    return false;
+                }
+
+                // Simple validation - in production, you'd validate AdminKey against AdminID
+                string expectedKey = GenerateAdminKey(adminData["AdminID"]);
+                if (adminData["AdminKey"] != expectedKey)
+                {
+                    Logger.Warning("Invalid admin license key");
+                    Console.WriteLine("⚠️ Invalid admin license key.");
+                    return false;
+                }
+
+                Logger.Info("Admin license validated successfully");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error validating admin license", ex);
+                return false;
+            }
+        }
+
+        static string GenerateAdminKey(string adminId)
+        {
+            // Simple hash for admin key - in production use a more secure method
+            using (SHA256 sha = SHA256.Create())
+            {
+                string data = adminId + "|DIGISIGN_ADMIN_SECRET";
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
+                return BitConverter.ToString(hash).Replace("-", "");
+            }
+        }
+
+        static bool GenerateLicenseFromKey(string licenseKeyPath)
+        {
+            try
+            {
+                Logger.Info($"Generating license from key file: {licenseKeyPath}");
+                
+                // Read license.key file
+                var keyLines = File.ReadAllLines(licenseKeyPath);
+                var keyData = new Dictionary<string, string>();
+
+                foreach (var line in keyLines)
+                {
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+                    
+                    var parts = line.Split(new[] { '=' }, 2);
+                    if (parts.Length == 2)
+                    {
+                        keyData[parts[0].Trim()] = parts[1].Trim();
+                    }
+                }
+
+                if (!keyData.ContainsKey("DeviceID"))
+                {
+                    Logger.Error("Invalid license.key file - missing DeviceID");
+                    Console.WriteLine("Error: Invalid license.key file - missing DeviceID.");
+                    return false;
+                }
+
+                string deviceId = keyData["DeviceID"];
+                string machineName = keyData.ContainsKey("MachineName") ? keyData["MachineName"] : "Unknown";
+
+                Logger.Debug($"Device ID from key: {deviceId}");
+                Logger.Debug($"Machine Name: {machineName}");
+
+                Console.WriteLine();
+                Console.WriteLine($"Device ID: {deviceId}");
+                Console.WriteLine($"Machine Name: {machineName}");
+                Console.WriteLine();
+
+                // Get license details from admin
+                Console.Write("Enter Customer ID: ");
+                string customerId = Console.ReadLine()?.Trim();
+                if (string.IsNullOrWhiteSpace(customerId))
+                {
+                    Logger.Error("Customer ID cannot be empty");
+                    Console.WriteLine("Error: Customer ID cannot be empty.");
+                    return false;
+                }
+
+                Console.Write("Enter License Number: ");
+                string licenseNumber = Console.ReadLine()?.Trim();
+                if (string.IsNullOrWhiteSpace(licenseNumber))
+                {
+                    Logger.Error("License Number cannot be empty");
+                    Console.WriteLine("Error: License Number cannot be empty.");
+                    return false;
+                }
+
+                Console.Write("Enter Expiration Date (YYYY-MM-DD): ");
+                string validUntilStr = Console.ReadLine()?.Trim();
+                if (!DateTime.TryParse(validUntilStr, out DateTime validUntil))
+                {
+                    Logger.Error($"Invalid date format: {validUntilStr}");
+                    Console.WriteLine("Error: Invalid date format.");
+                    return false;
+                }
+
+                if (validUntil <= DateTime.Now)
+                {
+                    Logger.Error($"Expiration date is in the past: {validUntil:yyyy-MM-dd}");
+                    Console.WriteLine("Error: Expiration date must be in the future.");
+                    return false;
+                }
+
+                Logger.Debug($"Customer ID: {customerId}");
+                Logger.Debug($"License Number: {licenseNumber}");
+                Logger.Debug($"Valid Until: {validUntil:yyyy-MM-dd}");
+
+                // Generate device hash
+                string deviceHash = GenerateDeviceHash(deviceId, licenseNumber);
+                Logger.Debug($"Generated Device Hash: {deviceHash}");
+
+                // Create license.txt in the same directory as license.key
+                string outputDir = Path.GetDirectoryName(licenseKeyPath);
+                string licensePath = Path.Combine(outputDir, "license.txt");
+
+                var licenseContent = new StringBuilder();
+                licenseContent.AppendLine($"CustomerID={customerId}");
+                licenseContent.AppendLine($"ValidUntil={validUntil:yyyy-MM-dd}");
+                licenseContent.AppendLine($"DeviceID={deviceId}");
+                licenseContent.AppendLine($"LicenseNumber={licenseNumber}");
+                licenseContent.AppendLine($"DeviceHash={deviceHash}");
+
+                File.WriteAllText(licensePath, licenseContent.ToString());
+                Logger.Info($"License file generated successfully: {licensePath}");
+
+                Console.WriteLine();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("License Details:");
+                Console.WriteLine($"  Customer ID: {customerId}");
+                Console.WriteLine($"  License Number: {licenseNumber}");
+                Console.WriteLine($"  Valid Until: {validUntil:yyyy-MM-dd}");
+                Console.WriteLine($"  Device ID: {deviceId}");
+                Console.WriteLine($"  Output File: {licensePath}");
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error generating license from key", ex);
+                Console.WriteLine($"Error generating license: {ex.Message}");
+                return false;
+            }
+        }
+
         static XmlData ReadXmlData(string xmlFilePath)
         {
             try
             {
+                Logger.Debug($"Reading XML configuration from: {xmlFilePath}");
+                
+                if (!File.Exists(xmlFilePath))
+                {
+                    Logger.Error($"XML file not found: {xmlFilePath}");
+                    return null;
+                }
+                
                 var xmlDoc = XDocument.Load(xmlFilePath);
                 var envelope = xmlDoc.Element("ENVELOPE");
-                if (envelope == null) return null;
+                if (envelope == null)
+                {
+                    Logger.Error("Invalid XML structure: ENVELOPE element not found");
+                    return null;
+                }
 
                 var fileNameLists = envelope.Element("FILENAMELIST")?.Elements("FILENAMELIST").ToList();
                 if (fileNameLists == null || fileNameLists.Count < 10)
                 {
-                    LogToFile($"Error;Invalid or incomplete XML structure", "");
+                    Logger.Error($"Invalid or incomplete XML structure. Expected at least 10 FILENAMELIST elements, found: {fileNameLists?.Count ?? 0}");
                     return null;
                 }
 
@@ -323,6 +869,7 @@ namespace DigiSign
                     if (!string.IsNullOrWhiteSpace(path))
                         xmlData.InputFilePaths.Add(path);
                 }
+                Logger.Debug($"Input files found in XML: {xmlData.InputFilePaths.Count}");
 
                 // 1: Output folder path
                 xmlData.OutputFolderPath = fileNameLists[1].Element("FILENAME")?.Value.Trim();
@@ -357,12 +904,12 @@ namespace DigiSign
                     xmlData.UseSelfSigned = (flag == "Y");
                 }
 
-
+                Logger.Info("XML configuration loaded successfully");
                 return xmlData;
             }
             catch (Exception ex)
             {
-                LogToFile($"Error;parsing XML:{ex.Message}", "");
+                Logger.Error($"Error parsing XML configuration", ex);
                 return null;
             }
         }
@@ -393,6 +940,7 @@ namespace DigiSign
 
         static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin, XmlData xmlData)
         {
+            Logger.Debug($"Loading certificate with CN: {commonName}");
             X509Store[] stores = new X509Store[]
             {
         new X509Store(StoreName.My, StoreLocation.CurrentUser),
@@ -403,14 +951,16 @@ namespace DigiSign
             {
                 try
                 {
-                    LogToFile($"DEBUG;Searching certificates in {store.Location} \\ {store.Name} store...", "");
+                    Logger.Debug($"Searching certificates in {store.Location}\\{store.Name} store");
                     store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
 
                     // Step 1: Try USB token certificate first
                     var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
+                    Logger.Debug($"Found {certs.Count} certificate(s) matching name: {commonName}");
+                    
                     foreach (var cert in certs.Cast<X509Certificate2>())
                     {
-                        LogToFile($"DEBUG;Certificate found: Subject={cert.Subject}, Issuer={cert.Issuer}, HasPrivateKey={cert.HasPrivateKey}", "");
+                        Logger.Debug($"Certificate found - Subject: {cert.Subject}, Issuer: {cert.Issuer}, HasPrivateKey: {cert.HasPrivateKey}");
 
                         if (CertificateMatchesCN(cert, commonName))
                         {
@@ -423,21 +973,21 @@ namespace DigiSign
                                         if (rsa is RSACryptoServiceProvider rsaCsp && rsaCsp.CspKeyContainerInfo.HardwareDevice)
                                         {
                                             cert.SetPinForPrivateKey(pin);
-                                            LogToFile($"Info;PIN forced for hardware token certificate.", "");
+                                            Logger.Info("PIN set for hardware token certificate");
                                         }
                                         else
                                         {
-                                            LogToFile($"Info;Certificate has private key, but not hardware token. No PIN forced.", "");
+                                            Logger.Debug("Certificate has private key, but not hardware token. No PIN set");
                                         }
                                     }
                                 }
                                 catch (CryptographicException ex)
                                 {
-                                    LogToFile($"Warning;Unable to access private key safely: {ex.Message}", "");
+                                    Logger.Warning($"Unable to access private key: {ex.Message}");
                                 }
                             }
 
-                            LogToFile($"Info;Certificate matched CN='{commonName}': {cert.Subject}", "");
+                            Logger.Info($"Certificate matched CN='{commonName}': {cert.Subject}");
                             return cert;
                         }
 
@@ -453,23 +1003,23 @@ namespace DigiSign
 
                             if (selfSignedCert != null)
                             {
-                                LogToFile($"Info;Selected self-signed certificate: {selfSignedCert.Subject}", "");
+                                Logger.Info($"Selected self-signed certificate: {selfSignedCert.Subject}");
                                 return selfSignedCert;
                             }
                             else
                             {
-                                LogToFile($"Warning;No matching self-signed certificate found in this store.", "");
+                                Logger.Debug("No matching self-signed certificate found in this store");
                             }
                         }
                         else
                         {
-                            LogToFile($"Info;Self-signed certificate selection disabled.", "");
+                            Logger.Debug("Self-signed certificate selection disabled");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    LogToFile($"Error;Failed to open {store.Location}\\{store.Name} store: {ex.Message}", "");
+                    Logger.Error($"Failed to open {store.Location}\\{store.Name} store", ex);
                 }
                 finally
                 {
@@ -478,13 +1028,14 @@ namespace DigiSign
             }
 
             // Not found
-            LogToFile($"Error;No certificate found for CN='{commonName}' in any store.", "");
+            Logger.Error($"No certificate found for CN='{commonName}' in any store");
             return null;
         }
         static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath, bool isDemoMode)
         {
             try
             {
+                Logger.Info($"Starting PDF processing - Demo Mode: {isDemoMode}");
 
                 // Extract CN from the certificate subject
                 string cn = cert.Subject
@@ -494,285 +1045,289 @@ namespace DigiSign
                     ?.Substring(3) ?? "Unknown";
 
                 string signatureText = isDemoMode 
-                    ? $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}\n*** DEMO MODE ***"
+                    ? $"NOT DIGITALLY SIGNED\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}\n*** DEMO MODE ***\n*** NO CRYPTOGRAPHIC SIGNATURE ***"
                     : $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+
+                Logger.Debug($"Signature text: {signatureText.Replace("\n", " | ")}");
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
                 int pageCount = reader.NumberOfPages;
-              
+                
+                Logger.Debug($"PDF has {pageCount} pages");
 
-                // Determine which pages to sign
-                var pagesToSign = new List<int>();
+                // Determine which pages to process
+                var pagesToProcess = new List<int>();
                 switch (signOnPage?.ToUpper())
                 {
                     case "F":
-                        pagesToSign.Add(1); // First page
+                        pagesToProcess.Add(1); // First page
                         break;
                     case "E":
-                        pagesToSign.AddRange(Enumerable.Range(1, pageCount)); // Each page
+                        pagesToProcess.AddRange(Enumerable.Range(1, pageCount)); // Each page
                         break;
                     case "L":
                     default:
-                        pagesToSign.Add(pageCount); // Last page
+                        pagesToProcess.Add(pageCount); // Last page
                         break;
                 }
 
-                using (FileStream os = new FileStream(outputPath, FileMode.Create))
+                if (isDemoMode)
                 {
-                    PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
-                    PdfSignatureAppearance appearance = stamper.SignatureAppearance;
-                    appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
-                    appearance.Reason = "Digitally signed";
-                    appearance.Acro6Layers = false;
-
-                    // Sign each specified page
-                    foreach (int page in pagesToSign)
+                    // DEMO MODE: Just add visual text overlay without digital signature
+                    Logger.Info("Demo mode: Adding visual text overlay WITHOUT cryptographic signature");
+                    
+                    using (FileStream os = new FileStream(outputPath, FileMode.Create))
                     {
-                        iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
-                        float pageWidth = pageSize.Width;
-                        float pageHeight = pageSize.Height;
-                        
+                        PdfStamper stamper = new PdfStamper(reader, os);
 
-                        // Validate coordinates
-                        float adjustedX = x;
-                        float adjustedY = y;
-                        float adjustedWidth = width;
-                        float adjustedHeight = height;
-
-                        if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
+                        foreach (int page in pagesToProcess)
                         {
-                            LogToFile($"Error; Signature rectangle is outside page {page} boundaries. Adjusting coordinates", "");
-                            adjustedX = Math.Max(50, x);
-                            adjustedY = Math.Max(50, y);
-                            adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
-                            adjustedHeight = Math.Min(height, pageHeight - adjustedY - 50);
+                            iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
+                            float pageWidth = pageSize.Width;
+                            float pageHeight = pageSize.Height;
+
+                            // Validate coordinates
+                            float adjustedX = x;
+                            float adjustedY = y;
+                            float adjustedWidth = width;
+                            float adjustedHeight = height;
+
+                            if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
+                            {
+                                Logger.Warning($"Text rectangle outside page {page} boundaries. Adjusting coordinates");
+                                Logger.Debug($"Original: X={x}, Y={y}, W={width}, H={height}, PageSize: {pageWidth}x{pageHeight}");
+                                adjustedX = Math.Max(50, x);
+                                adjustedY = Math.Max(50, y);
+                                adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
+                                adjustedHeight = Math.Min(height, pageHeight - adjustedY - 50);
+                                Logger.Debug($"Adjusted: X={adjustedX}, Y={adjustedY}, W={adjustedWidth}, H={adjustedHeight}");
+                            }
+
+                            // Draw demo text overlay
+                            PdfContentByte over = stamper.GetOverContent(page);
+                            DrawSignatureText(over, cn, signatureText, adjustedX, adjustedY, adjustedWidth, adjustedHeight, true);
                         }
-                        //Console.WriteLine($"Signature Rectangle on page {page}: x={adjustedX}, y={adjustedY}, width={adjustedWidth}, height={adjustedHeight}");
 
-                        // Define visible signature area for the current page
-                        appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(adjustedX, adjustedY, adjustedX + adjustedWidth, adjustedY + adjustedHeight), page, $"sig_{page}");
+                        stamper.Close();
+                        Logger.Info($"PDF processed in demo mode (no signature): {Path.GetFileName(outputPath)}");
+                        Logger.LogToPlf($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", isError: false);
+                    }
+                }
+                else
+                {
+                    // FULL MODE: Apply actual digital signature
+                    Logger.Info("Full mode: Applying cryptographic digital signature");
+                    
+                    using (FileStream os = new FileStream(outputPath, FileMode.Create))
+                    {
+                        PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
+                        PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+                        appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
+                        appearance.Reason = "Digitally signed";
+                        appearance.Acro6Layers = false;
 
-                        // Disable default Layer2 text to avoid double rendering
-                        appearance.Layer2Text = string.Empty;
+                        // Sign each specified page
+                        foreach (int page in pagesToProcess)
+                        {
+                            iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
+                            float pageWidth = pageSize.Width;
+                            float pageHeight = pageSize.Height;
 
-                        // Draw on the actual page content
-                        PdfContentByte over = stamper.GetOverContent(page);
-                        over.SaveState();
+                            // Validate coordinates
+                            float adjustedX = x;
+                            float adjustedY = y;
+                            float adjustedWidth = width;
+                            float adjustedHeight = height;
 
-                        // Draw text with wrapping
-                        BaseFont baseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for CN
-                        BaseFont baseFontText = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED); // Font for signature text
+                            if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
+                            {
+                                Logger.Warning($"Signature rectangle outside page {page} boundaries. Adjusting coordinates");
+                                Logger.Debug($"Original: X={x}, Y={y}, W={width}, H={height}, PageSize: {pageWidth}x{pageHeight}");
+                                adjustedX = Math.Max(50, x);
+                                adjustedY = Math.Max(50, y);
+                                adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
+                                adjustedHeight = Math.Min(height, pageHeight - adjustedY - 50);
+                                Logger.Debug($"Adjusted: X={adjustedX}, Y={adjustedY}, W={adjustedWidth}, H={adjustedHeight}");
+                            }
 
-                        float fontSizeCN = 10; // Slightly larger font size for CN
-                        float fontSizeText = 9; // Regular font size for signature text
-                        float padding = 3;
-                        float maxTextWidth = adjustedWidth - 2 * padding;
-                        float leadingCN = fontSizeCN + 3; // Line spacing for CN
-                        float leadingText = fontSizeText + 1; // Line spacing for signature text
-                        float maxY = adjustedY + adjustedHeight - padding;
-                        float minY = adjustedY + padding;
-                        float currentY = maxY;
+                            // Define visible signature area for the current page
+                            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(adjustedX, adjustedY, adjustedX + adjustedWidth, adjustedY + adjustedHeight), page, $"sig_{page}");
 
-                        over.BeginText();
-                        // Draw CN with wrapping
-                        over.SetFontAndSize(baseFontCN, fontSizeCN);
+                            // Disable default Layer2 text to avoid double rendering
+                            appearance.Layer2Text = string.Empty;
+
+                            // Draw signature appearance
+                            PdfContentByte over = stamper.GetOverContent(page);
+                            DrawSignatureText(over, cn, signatureText, adjustedX, adjustedY, adjustedWidth, adjustedHeight, false);
+                        }
+
+                        // Create a custom implementation of IExternalSignature
+                        IExternalSignature externalSignature = new SafeCertificateSignature(cert, "SHA-256");
+
+                        // Convert the certificate to a BouncyCastle certificate
+                        Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
+
+                        // Sign the document
+                        var ocspClient = new OcspClientBouncyCastle();
+                        ITSAClient tsaClient = null;
+
+                        try
+                        {
+                            Logger.Debug("Attempting to get timestamp from DigiCert");
+                            tsaClient = new TSAClientBouncyCastle("http://timestamp.digicert.com");
+                            Logger.Info("Timestamp service connected successfully");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warning($"TSA not available, proceeding without timestamp: {ex.Message}");
+                        }
+
+                        MakeSignature.SignDetached(
+                            appearance,
+                            externalSignature,
+                            new[] { bcCert },
+                            null,
+                            ocspClient,
+                            tsaClient,
+                            0,
+                            CryptoStandard.CMS
+                        );
+
+                        Logger.Info($"PDF digitally signed successfully: {Path.GetFileName(outputPath)}");
+                        Logger.LogToPlf($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", isError: false);
+                    }
+                }
+
+                reader.Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Failed to process PDF: {Path.GetFileName(inputPath)}", ex);
+                Logger.LogToPlf($"ERROR: Failed to process '{Path.GetFileName(inputPath)}' - {ex.Message}", isError: true);
+                throw; // Re-throw to be caught in Main method
+            }
+        }
+
+        static void DrawSignatureText(PdfContentByte over, string cn, string signatureText, float adjustedX, float adjustedY, float adjustedWidth, float adjustedHeight, bool isDemoMode)
+        {
+            over.SaveState();
+
+            // Draw text with wrapping
+            BaseFont baseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            BaseFont baseFontText = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+
+            float fontSizeCN = 10;
+            float fontSizeText = 9;
+            float padding = 3;
+            float maxTextWidth = adjustedWidth - 2 * padding;
+            float leadingCN = fontSizeCN + 3;
+            float leadingText = fontSizeText + 1;
+            float maxY = adjustedY + adjustedHeight - padding;
+            float minY = adjustedY + padding;
+            float currentY = maxY;
+
+            over.BeginText();
+
+            // Draw CN with wrapping (only in full mode)
+            if (!isDemoMode)
+            {
+                over.SetFontAndSize(baseFontCN, fontSizeCN);
+                over.SetColorFill(BaseColor.BLACK);
+                string cnLine = cn.Trim();
+                if (!string.IsNullOrEmpty(cnLine))
+                {
+                    List<string> wrappedCNLines = new List<string>();
+                    string[] words = cnLine.Split(' ');
+                    string currentLine = "";
+                    foreach (string word in words)
+                    {
+                        string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
+                        float lineWidth = baseFontCN.GetWidthPoint(testLine, fontSizeCN);
+                        if (lineWidth <= maxTextWidth)
+                        {
+                            currentLine = testLine;
+                        }
+                        else
+                        {
+                            wrappedCNLines.Add(currentLine);
+                            currentLine = word;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(currentLine))
+                        wrappedCNLines.Add(currentLine);
+
+                    foreach (string wrappedLine in wrappedCNLines)
+                    {
+                        if (currentY - leadingCN < minY) break;
+                        over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
+                        currentY -= leadingCN;
+                    }
+                }
+            }
+
+            // Draw signature text (in demo mode: all lines, in full mode: skip first CN line)
+            over.SetFontAndSize(baseFontText, fontSizeText);
+            var signatureLines = isDemoMode 
+                ? signatureText.Split('\n').ToList()  // In demo mode, show all lines (no CN to skip)
+                : signatureText.Split('\n').Skip(1).ToList();  // In full mode, skip the CN line
+            
+            Logger.Debug($"Drawing {signatureLines.Count} signature text lines");
+
+            foreach (string rawLine in signatureLines)
+            {
+                string line = rawLine.Trim();
+                if (string.IsNullOrEmpty(line)) continue;
+
+                Logger.Debug($"Processing signature line: {line}");
+
+                List<string> wrappedLines = new List<string>();
+                string[] words = line.Split(' ');
+                string currentLine = "";
+
+                foreach (string word in words)
+                {
+                    string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
+                    float lineWidth = baseFontText.GetWidthPoint(testLine, fontSizeText);
+
+                    if (lineWidth <= maxTextWidth)
+                    {
+                        currentLine = testLine;
+                    }
+                    else
+                    {
+                        wrappedLines.Add(currentLine);
+                        currentLine = word;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(currentLine))
+                {
+                    wrappedLines.Add(currentLine);
+                }
+
+                foreach (string wrappedLine in wrappedLines)
+                {
+                    if (currentY - leadingText < minY) break;
+
+                    // Make demo mode text red
+                    if (isDemoMode && (line.Contains("DEMO MODE") || line.Contains("NOT DIGITALLY SIGNED") || line.Contains("NO CRYPTOGRAPHIC")))
+                    {
+                        over.SetColorFill(BaseColor.RED);
+                        Logger.Debug($"Drawing DEMO MODE text in RED at Y={currentY}");
+                    }
+                    else
+                    {
                         over.SetColorFill(BaseColor.BLACK);
-                        string cnLine = cn.Trim();
-                        if (!string.IsNullOrEmpty(cnLine))
-                        {
-                            List<string> wrappedCNLines = new List<string>();
-                            string[] words = cnLine.Split(' ');
-                            string currentLine = "";
-                            foreach (string word in words)
-                            {
-                                string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
-                                float lineWidth = baseFontCN.GetWidthPoint(testLine, fontSizeCN);
-                                if (lineWidth <= maxTextWidth)
-                                {
-                                    currentLine = testLine;
-                                }
-                                else
-                                {
-                                    wrappedCNLines.Add(currentLine);
-                                    currentLine = word;
-                                }
-                            }
-                            if (!string.IsNullOrEmpty(currentLine))
-                                wrappedCNLines.Add(currentLine);
-
-                            foreach (string wrappedLine in wrappedCNLines)
-                            {
-                                if (currentY - leadingCN < minY) break;
-                                over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                                currentY -= leadingCN;
-                            }
-                        }
-
-                        // Path to your check mark image
-                        //string checkmarkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "checkmark.png");
-                        //if (File.Exists(checkmarkPath))
-                        //{
-                        //    iTextSharp.text.Image checkImg = iTextSharp.text.Image.GetInstance(checkmarkPath);
-
-                        //    // Original image dimensions
-                        //    float originalWidth = checkImg.Width;
-                        //    float originalHeight = checkImg.Height;
-
-                        //    // Target box dimensions
-                        //    float maxWidth = adjustedWidth * 0.7f;
-                        //    float maxHeight = adjustedHeight * 0.7f;
-
-                        //    // Calculate scale ratio
-                        //    float widthRatio = maxWidth / originalWidth;
-                        //    float heightRatio = maxHeight / originalHeight;
-                        //    float scale = Math.Min(widthRatio, heightRatio); // Preserve aspect ratio
-
-                        //    // Scaled image size
-                        //    float imgWidth = originalWidth * scale;
-                        //    float imgHeight = originalHeight * scale;
-
-                        //    // Center the image inside the signature box
-                        //    float imgX = adjustedX + (adjustedWidth - imgWidth) / 2;
-                        //    float imgY = adjustedY + (adjustedHeight - imgHeight) / 2;
-
-                        //    checkImg.ScaleAbsolute(imgWidth, imgHeight);
-                        //    checkImg.SetAbsolutePosition(imgX, imgY);
-                        //    checkImg.Alignment = iTextSharp.text.Image.UNDERLYING;
-
-                        //    over.AddImage(checkImg);
-                        //}
-
-
-                        // Draw signature text (excluding the CN line)
-                        over.SetFontAndSize(baseFontText, fontSizeText);
-                        foreach (string rawLine in signatureText.Split('\n').Skip(1)) // Skip the first line (CN)
-                        {
-                            string line = rawLine.Trim();
-                            if (string.IsNullOrEmpty(line)) continue;
-
-                            List<string> wrappedLines = new List<string>();
-                            string[] words = line.Split(' ');
-                            string currentLine = "";
-
-                            foreach (string word in words)
-                            {
-                                string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
-                                float lineWidth = baseFontText.GetWidthPoint(testLine, fontSizeText);
-
-                                if (lineWidth <= maxTextWidth)
-                                {
-                                    currentLine = testLine;
-                                }
-                                else
-                                {
-                                    wrappedLines.Add(currentLine);
-                                    currentLine = word;
-                                }
-                            }
-
-                            if (!string.IsNullOrEmpty(currentLine))
-                            {
-                                wrappedLines.Add(currentLine);
-                            }
-
-                            foreach (string wrappedLine in wrappedLines)
-                            {
-                                if (currentY - leadingText < minY) break;
-                                over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                                currentY -= leadingText;
-                            }
-                        }
-
-                        over.EndText();
-
-                        over.RestoreState();
                     }
 
-
-                    // Create a custom implementation of IExternalSignature
-                    IExternalSignature externalSignature = new SafeCertificateSignature(cert, "SHA-256");
-
-                    // Convert the certificate to a BouncyCastle certificate
-                    Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
-
-                    // Sign the document
-                    var ocspClient = new OcspClientBouncyCastle();
-                    ITSAClient tsaClient = null;
-
-                    try
-                    {
-                        tsaClient = new TSAClientBouncyCastle("http://timestamp.digicert.com");
-                    }
-                    catch (Exception ex)
-                    {
-                        LogToFile($"Warning: TSA not available, proceeding without timestamp. {ex.Message}", outputFolderPath);
-                        // You can continue signing without timestamp
-                    }
-
-
-
-                    MakeSignature.SignDetached(
-                        appearance,
-                        externalSignature,
-                        new[] { bcCert },
-                        null,                // or a CRL list if needed
-                        ocspClient,
-                        tsaClient,
-                        0,
-                        CryptoStandard.CMS
-                    );
-
-
-
-                    LogToPlfFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
+                    over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
+                    currentY -= leadingText;
                 }
             }
-            catch (Exception ex)
-            {
-               
-                LogToPlfFile($"ERROR Failed to sign '{Path.GetFileName(inputPath)}'. Exception: {ex.Message}", outputFolderPath);
 
-            }
-        }
-
-
-    static void LogToPlfFile(string message, string outputFolderPath)
-    {
-        try
-        {
-            string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-            string logMessage = $"{message}";
-        
-            File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("Failed to write to log file: " + ex.Message);
-        }
-    }
-
-        static readonly string LogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "application_log.txt");
-        static bool logInitialized = false;
-
-        static void LogToFile(string message, string outputFolderPath)
-        {
-            try
-            {
-                // Reset log file only once at program start
-                if (!logInitialized)
-                {
-                    File.WriteAllText(LogFilePath, string.Empty); // Clear file
-                    logInitialized = true;
-                }
-
-                string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {message}";
-                File.AppendAllText(LogFilePath, logMessage + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Failed to write to log file: " + ex.Message);
-            }
+            over.EndText();
+            over.RestoreState();
         }
 
 

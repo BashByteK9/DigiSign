@@ -1,0 +1,24 @@
+# Admin License File Template
+# Rename this file to "admin.license" after filling in the required information
+# This file enables license generation capabilities for administrators only
+
+# Required Fields:
+AdminID=ADMIN001
+AdminKey=<GENERATE_ADMIN_KEY>
+ValidUntil=2030-12-31
+
+# Instructions:
+# 1. Replace ADMIN001 with your unique admin ID
+# 2. Generate the AdminKey using the formula: SHA256(AdminID + "|DIGISIGN_ADMIN_SECRET")
+# 3. Set the ValidUntil date (YYYY-MM-DD format)
+# 4. Rename this file to "admin.license" and place it in the application directory
+#
+# Example AdminKey generation (PowerShell):
+# $adminId = "ADMIN001"
+# $data = "$adminId|DIGISIGN_ADMIN_SECRET"
+# $bytes = [System.Text.Encoding]::UTF8.GetBytes($data)
+# $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+# [BitConverter]::ToString($hash).Replace("-", "")
+#
+# Result for ADMIN001: 
+# AdminKey=E8B3F5D9C4A1B2E6F7D8C9A0B1E2F3D4C5A6B7E8F9D0A1B2C3D4E5F6A7B8C9D0

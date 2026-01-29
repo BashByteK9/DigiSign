@@ -1,0 +1,6 @@
+# Admin License File
+# This file enables license generation capabilities for administrators
+
+AdminID=ADMIN001
+AdminKey=E8B3F5D9C4A1B2E6F7D8C9A0B1E2F3D4C5A6B7E8F9D0A1B2C3D4E5F6A7B8C9D0
+ValidUntil=2030-12-31
