@@ -82,16 +82,37 @@ namespace DigiSign
             string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
             string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             var xmlData = ReadXmlData(xmlFilePath);
-            //string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
+            bool isDemoMode = false;
 
+            // Check license
+            if (File.Exists(licensePath))
+            {
+                if (ValidateLicense(licensePath))
+                {
+                    Console.WriteLine("✅ License valid — Full Mode enabled.");
+                }
+                else
+                {
+                    Console.WriteLine("❌ License invalid or used on a different device — Demo Mode enabled.");
+                    isDemoMode = true;
+                }
+            }
+            else
+            {
+                Console.WriteLine("⚠️ License file not found — Demo Mode enabled.");
+                Console.WriteLine("Looking for license at: " + licensePath);
+                string deviceId = GetDeviceId();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("Device License Key (required for activation):");
+                Console.WriteLine(deviceId);
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("Please use this Device License Key with the external license");
+                Console.WriteLine("application to generate your license file.");
+                Console.WriteLine();
+                isDemoMode = true;
+            }
 
-            //if (File.Exists(licensePath))
-            //{
-            //    if (ValidateLicense(licensePath))
-            //    {
-                    //Console.WriteLine("✅ License valid — Full Mode enabled.");
-
-                    if (xmlData != null &&
+            if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
                 !string.IsNullOrEmpty(xmlData.OutputFolderPath) &&
                 !string.IsNullOrEmpty(xmlData.CommonName))
@@ -132,7 +153,7 @@ namespace DigiSign
                             string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
 
-                            SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath);
+                            SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath, isDemoMode);
                         }
 
                         // Open output folder if specified
@@ -163,54 +184,80 @@ namespace DigiSign
             {
                 LogToFile($"Error;Invalid XML data: Missing required fields.{xmlFilePath}", "");
             }
-                }
-        //        else
-        //        {
-        //            Console.WriteLine("License invalid or used on a different device — Demo Mode enabled.");
-        //            // Restrict to demo features
-        //        }
-        //    }
-        //    else
-        //    {
-        //        Console.WriteLine("Looking for license at: " + licensePath);
-        //        Console.WriteLine("License file not found — Demo Mode enabled.");
-        //        // Restrict to demo features
-        //    }
-
-        //}
+        }
 
         static bool ValidateLicense(string filePath)
         {
-            var lines = File.ReadAllLines(filePath);
-            var licenseData = lines.Select(line => line.Split('=')).ToDictionary(parts => parts[0], parts => parts[1]);
-
-            string storedDeviceId = licenseData["DeviceID"];
-            string storedHash = licenseData["DeviceHash"];
-            string licenseNumber = licenseData["LicenseNumber"];
-            string validUntil = licenseData["ValidUntil"];
-
-            string currentDeviceId = GetDeviceId();
-
-            if (storedDeviceId != currentDeviceId)
+            try
             {
-                Console.WriteLine("Device mismatch.");
+                var lines = File.ReadAllLines(filePath);
+                var licenseData = new Dictionary<string, string>();
+                
+                // Parse license file with validation
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    
+                    var parts = line.Split(new[] { '=' }, 2);
+                    if (parts.Length == 2)
+                    {
+                        licenseData[parts[0].Trim()] = parts[1].Trim();
+                    }
+                }
+
+                // Check all required keys exist
+                if (!licenseData.ContainsKey("DeviceID") || 
+                    !licenseData.ContainsKey("DeviceHash") || 
+                    !licenseData.ContainsKey("LicenseNumber") || 
+                    !licenseData.ContainsKey("ValidUntil"))
+                {
+                    Console.WriteLine("License file is missing required fields.");
+                    return false;
+                }
+
+                string storedDeviceId = licenseData["DeviceID"];
+                string storedHash = licenseData["DeviceHash"];
+                string licenseNumber = licenseData["LicenseNumber"];
+                string validUntil = licenseData["ValidUntil"];
+
+                // Validate that required values are not empty
+                if (string.IsNullOrWhiteSpace(storedDeviceId) || 
+                    string.IsNullOrWhiteSpace(storedHash) || 
+                    string.IsNullOrWhiteSpace(licenseNumber) || 
+                    string.IsNullOrWhiteSpace(validUntil))
+                {
+                    Console.WriteLine("License file contains empty required fields.");
+                    return false;
+                }
+
+                string currentDeviceId = GetDeviceId();
+
+                if (storedDeviceId != currentDeviceId)
+                {
+                    Console.WriteLine("Device mismatch.");
+                    return false;
+                }
+
+                string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
+                if (computedHash != storedHash)
+                {
+                    Console.WriteLine("Device hash mismatch.");
+                    return false;
+                }
+
+                if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
+                {
+                    Console.WriteLine("License expired.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error validating license: {ex.Message}");
                 return false;
             }
-
-            string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
-            if (computedHash != storedHash)
-            {
-                Console.WriteLine("Device hash mismatch.");
-                return false;
-            }
-
-            if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
-            {
-                Console.WriteLine("License expired.");
-                return false;
-            }
-
-            return true;
         }
 
         static string GenerateDeviceHash(string deviceId, string licenseNumber)
@@ -434,7 +481,7 @@ namespace DigiSign
             LogToFile($"Error;No certificate found for CN='{commonName}' in any store.", "");
             return null;
         }
-        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
+        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath, bool isDemoMode)
         {
             try
             {
@@ -446,8 +493,9 @@ namespace DigiSign
                     .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
                     ?.Substring(3) ?? "Unknown";
 
-                string signatureText =
-                    $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+                string signatureText = isDemoMode 
+                    ? $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}\n*** DEMO MODE ***"
+                    : $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
