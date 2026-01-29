@@ -196,7 +196,9 @@ namespace DigiSign
                 // Parse license file with validation
                 foreach (var line in lines)
                 {
-                    var parts = line.Split('=');
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    
+                    var parts = line.Split(new[] { '=' }, 2);
                     if (parts.Length == 2)
                     {
                         licenseData[parts[0].Trim()] = parts[1].Trim();
@@ -217,6 +219,16 @@ namespace DigiSign
                 string storedHash = licenseData["DeviceHash"];
                 string licenseNumber = licenseData["LicenseNumber"];
                 string validUntil = licenseData["ValidUntil"];
+
+                // Validate that required values are not empty
+                if (string.IsNullOrWhiteSpace(storedDeviceId) || 
+                    string.IsNullOrWhiteSpace(storedHash) || 
+                    string.IsNullOrWhiteSpace(licenseNumber) || 
+                    string.IsNullOrWhiteSpace(validUntil))
+                {
+                    Console.WriteLine("License file contains empty required fields.");
+                    return false;
+                }
 
                 string currentDeviceId = GetDeviceId();
 
