@@ -82,14 +82,35 @@ namespace DigiSign
             string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
             string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             var xmlData = ReadXmlData(xmlFilePath);
-            //string pkcs11LibraryPath = @"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdpkcs.dll";
+            bool isDemoMode = false;
 
-
-            //if (File.Exists(licensePath))
-            //{
-            //    if (ValidateLicense(licensePath))
-            //    {
-                    //Console.WriteLine("✅ License valid — Full Mode enabled.");
+            // Check license
+            if (File.Exists(licensePath))
+            {
+                if (ValidateLicense(licensePath))
+                {
+                    Console.WriteLine("✅ License valid — Full Mode enabled.");
+                }
+                else
+                {
+                    Console.WriteLine("❌ License invalid or used on a different device — Demo Mode enabled.");
+                    isDemoMode = true;
+                }
+            }
+            else
+            {
+                Console.WriteLine("⚠️ License file not found — Demo Mode enabled.");
+                Console.WriteLine("Looking for license at: " + licensePath);
+                string deviceId = GetDeviceId();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("Device License Key (required for activation):");
+                Console.WriteLine(deviceId);
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine("Please use this Device License Key with the external license");
+                Console.WriteLine("application to generate your license file.");
+                Console.WriteLine();
+                isDemoMode = true;
+            }
 
                     if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
@@ -132,7 +153,7 @@ namespace DigiSign
                             string outputFileName = $"{inputFileName}";
                             string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
 
-                            SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath);
+                            SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath, isDemoMode);
                         }
 
                         // Open output folder if specified
@@ -163,21 +184,7 @@ namespace DigiSign
             {
                 LogToFile($"Error;Invalid XML data: Missing required fields.{xmlFilePath}", "");
             }
-                }
-        //        else
-        //        {
-        //            Console.WriteLine("License invalid or used on a different device — Demo Mode enabled.");
-        //            // Restrict to demo features
-        //        }
-        //    }
-        //    else
-        //    {
-        //        Console.WriteLine("Looking for license at: " + licensePath);
-        //        Console.WriteLine("License file not found — Demo Mode enabled.");
-        //        // Restrict to demo features
-        //    }
-
-        //}
+        }
 
         static bool ValidateLicense(string filePath)
         {
@@ -434,7 +441,7 @@ namespace DigiSign
             LogToFile($"Error;No certificate found for CN='{commonName}' in any store.", "");
             return null;
         }
-        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
+        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath, bool isDemoMode)
         {
             try
             {
@@ -446,8 +453,9 @@ namespace DigiSign
                     .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
                     ?.Substring(3) ?? "Unknown";
 
-                string signatureText =
-                    $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+                string signatureText = isDemoMode 
+                    ? $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}\n*** DEMO MODE ***"
+                    : $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
