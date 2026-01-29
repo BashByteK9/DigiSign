@@ -112,7 +112,7 @@ namespace DigiSign
                 isDemoMode = true;
             }
 
-                    if (xmlData != null &&
+            if (xmlData != null &&
                 xmlData.InputFilePaths.Any() &&
                 !string.IsNullOrEmpty(xmlData.OutputFolderPath) &&
                 !string.IsNullOrEmpty(xmlData.CommonName))
@@ -188,36 +188,64 @@ namespace DigiSign
 
         static bool ValidateLicense(string filePath)
         {
-            var lines = File.ReadAllLines(filePath);
-            var licenseData = lines.Select(line => line.Split('=')).ToDictionary(parts => parts[0], parts => parts[1]);
-
-            string storedDeviceId = licenseData["DeviceID"];
-            string storedHash = licenseData["DeviceHash"];
-            string licenseNumber = licenseData["LicenseNumber"];
-            string validUntil = licenseData["ValidUntil"];
-
-            string currentDeviceId = GetDeviceId();
-
-            if (storedDeviceId != currentDeviceId)
+            try
             {
-                Console.WriteLine("Device mismatch.");
+                var lines = File.ReadAllLines(filePath);
+                var licenseData = new Dictionary<string, string>();
+                
+                // Parse license file with validation
+                foreach (var line in lines)
+                {
+                    var parts = line.Split('=');
+                    if (parts.Length == 2)
+                    {
+                        licenseData[parts[0].Trim()] = parts[1].Trim();
+                    }
+                }
+
+                // Check all required keys exist
+                if (!licenseData.ContainsKey("DeviceID") || 
+                    !licenseData.ContainsKey("DeviceHash") || 
+                    !licenseData.ContainsKey("LicenseNumber") || 
+                    !licenseData.ContainsKey("ValidUntil"))
+                {
+                    Console.WriteLine("License file is missing required fields.");
+                    return false;
+                }
+
+                string storedDeviceId = licenseData["DeviceID"];
+                string storedHash = licenseData["DeviceHash"];
+                string licenseNumber = licenseData["LicenseNumber"];
+                string validUntil = licenseData["ValidUntil"];
+
+                string currentDeviceId = GetDeviceId();
+
+                if (storedDeviceId != currentDeviceId)
+                {
+                    Console.WriteLine("Device mismatch.");
+                    return false;
+                }
+
+                string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
+                if (computedHash != storedHash)
+                {
+                    Console.WriteLine("Device hash mismatch.");
+                    return false;
+                }
+
+                if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
+                {
+                    Console.WriteLine("License expired.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error validating license: {ex.Message}");
                 return false;
             }
-
-            string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
-            if (computedHash != storedHash)
-            {
-                Console.WriteLine("Device hash mismatch.");
-                return false;
-            }
-
-            if (!DateTime.TryParse(validUntil, out var validDate) || validDate < DateTime.Now)
-            {
-                Console.WriteLine("License expired.");
-                return false;
-            }
-
-            return true;
         }
 
         static string GenerateDeviceHash(string deviceId, string licenseNumber)
