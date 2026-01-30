@@ -126,6 +126,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="LicenseGenerationForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="X509Certificate2Extension.cs" />
@@ -136,15 +139,22 @@
     <None Include="admin.license.example" />
     <None Include="admin.license.template" />
     <None Include="ADMIN_LICENSE_FIX.md" />
+    <None Include="ADMIN_LICENSE_SOLUTION.md" />
+    <None Include="ADMIN_MODE_CANCELLATION_FIX.md" />
     <None Include="ADMIN_MODE_GUIDE.md" />
+    <None Include="ADMIN_MODE_IMPROVED_UX.md" />
     <None Include="ADMIN_MODE_UPDATE.md" />
+    <None Include="ADMIN_MODE_WINDOWS_FORMS.md" />
     <None Include="App.config" />
     <None Include="APPLICATION_BEHAVIOR.md" />
+    <None Include="CONSOLE_BUFFER_FIX.md" />
+    <None Include="CreateAdminLicense.bat" />
     <None Include="DEMO_MODE_FIX_SUMMARY.md" />
     <None Include="DEMO_MODE_NO_SIGNATURE.md" />
     <None Include="DEMO_MODE_NO_SIGNER_NAME.md" />
     <None Include="DEMO_MODE_QUICK_CARD.md" />
     <None Include="DEMO_MODE_VERIFICATION.md" />
+    <None Include="DigiSign_Admin.bat" />
     <None Include="DigiSign_TemporaryKey.pfx" />
     <None Include="GenerateAdminLicense.ps1" />
     <None Include="LICENSE_QUICK_REFERENCE.md" />
@@ -154,7 +164,11 @@
     <None Include="packages.config" />
     <None Include="PLF_FORMAT_UPDATE.md" />
     <None Include="PLF_LOG_FORMAT.md" />
+    <None Include="PROMPT_TROUBLESHOOTING.md" />
+    <None Include="RunAdminKeyTester.bat" />
     <None Include="SECURITY_FIX_ADMIN_LOGGING.md" />
+    <None Include="TestAdminLicense.bat" />
+    <None Include="TestAdminPrompt.bat" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -169,6 +183,7 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="DigiSign_Admin.vbs" />
     <Content Include="license.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

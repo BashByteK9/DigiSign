@@ -227,10 +227,6 @@ namespace DigiSign
             Logger.Initialize();
             Logger.Info("Application started");
             Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
-            // Initialize logger first
-            Logger.Initialize();
-            Logger.Info("Application started");
-            Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
 
             System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
             string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
@@ -335,59 +331,48 @@ namespace DigiSign
                 Logger.Info("Admin license validated - entering license generation mode");
                 Console.WriteLine("✅ Admin license validated");
                 Console.WriteLine();
+                
                 Console.WriteLine("This mode is ONLY for generating user licenses.");
                 Console.WriteLine("No PDF signing will be performed.");
                 Console.WriteLine();
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
                 Console.WriteLine();
                 
-                Console.Write("Enter the path to license.key file (or press Enter to exit): ");
-                string userLicenseKeyPath = Console.ReadLine()?.Trim();
+                // Use Windows Forms GUI for admin mode (completely avoids console input issues)
+                Logger.Debug("Showing License Generation Form");
                 
-                if (string.IsNullOrEmpty(userLicenseKeyPath))
+                Console.WriteLine("Opening License Generation Form...");
+                Console.WriteLine("(Please fill in the form that appears)");
+                Console.WriteLine();
+                
+                LicenseGenerationResult result = ShowLicenseGenerationForm();
+                
+                if (result == null || result.WasCancelled)
                 {
                     Console.WriteLine();
-                    Console.WriteLine("⚠️  License generation cancelled.");
-                    Logger.Info("Admin mode: User cancelled license generation");
+                    Console.WriteLine("License generation cancelled by user.");
+                    Logger.Info("Admin mode exited - User cancelled the license generation form");
                     Console.WriteLine();
                     Console.WriteLine("Press any key to exit...");
                     Console.ReadKey();
                     return;
                 }
                 
-                Logger.Debug($"License key path provided: {userLicenseKeyPath}");
+                Logger.Debug($"User input received from form");
+                Logger.Debug($"  License Key Path: {result.LicenseKeyPath}");
+                Logger.Debug($"  Customer ID: {result.CustomerId}");
+                Logger.Debug($"  License Number: {result.LicenseNumber}");
+                Logger.Debug($"  Expiration Date: {result.ExpirationDate:yyyy-MM-dd}");
                 
-                if (!File.Exists(userLicenseKeyPath))
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine();
-                    Console.WriteLine("❌ ERROR: License key file not found!");
-                    Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine($"Path provided: {userLicenseKeyPath}");
-                    Console.WriteLine();
-                    Console.WriteLine("Please verify:");
-                    Console.WriteLine("  1. The file path is correct");
-                    Console.WriteLine("  2. The file exists at that location");
-                    Console.WriteLine("  3. You have permission to read the file");
-                    Console.WriteLine();
-                    Console.WriteLine("Example valid paths:");
-                    Console.WriteLine("  C:\\Users\\Admin\\Desktop\\license.key");
-                    Console.WriteLine("  D:\\Licenses\\user123\\license.key");
-                    Console.WriteLine("  .\\license.key (current directory)");
-                    Logger.Error($"License key file not found: {userLicenseKeyPath}");
-                    Console.WriteLine();
-                    Console.WriteLine("Press any key to exit...");
-                    Console.ReadKey();
-                    return;
-                }
-                
-                // Generate license from the key file
+                // Generate license from the form data
                 Console.WriteLine();
-                Console.WriteLine($"✅ License key file found: {Path.GetFileName(userLicenseKeyPath)}");
+                Console.WriteLine($"✅ License key file: {Path.GetFileName(result.LicenseKeyPath)}");
+                Console.WriteLine($"✅ Customer ID: {result.CustomerId}");
+                Console.WriteLine($"✅ License Number: {result.LicenseNumber}");
+                Console.WriteLine($"✅ Expiration Date: {result.ExpirationDate:yyyy-MM-dd}");
                 Console.WriteLine();
                 
-                if (GenerateLicenseFromKey(userLicenseKeyPath))
+                if (GenerateLicenseFromForm(result))
                 {
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine();
@@ -398,7 +383,7 @@ namespace DigiSign
                     Console.WriteLine();
                     Console.WriteLine("The license.txt file has been created in the same folder");
                     Console.WriteLine("as the license.key file. Please send this file to the user.");
-                    Logger.Info($"License file generated successfully from: {userLicenseKeyPath}");
+                    Logger.Info($"License file generated successfully from: {result.LicenseKeyPath}");
                 }
                 else
                 {
@@ -799,14 +784,65 @@ namespace DigiSign
             }
         }
 
-        static bool GenerateLicenseFromKey(string licenseKeyPath)
+        // Helper class to pass form results
+        class LicenseGenerationResult
+        {
+            public string LicenseKeyPath { get; set; }
+            public string CustomerId { get; set; }
+            public string LicenseNumber { get; set; }
+            public DateTime ExpirationDate { get; set; }
+            public bool WasCancelled { get; set; }
+        }
+
+        static LicenseGenerationResult ShowLicenseGenerationForm()
         {
             try
             {
-                Logger.Info($"Generating license from key file: {licenseKeyPath}");
+                Logger.Debug("Creating LicenseGenerationForm instance");
+                
+                using (var form = new LicenseGenerationForm())
+                {
+                    Logger.Debug("Showing form dialog");
+                    var dialogResult = form.ShowDialog();
+                    Logger.Debug($"Dialog result: {dialogResult}");
+                    
+                    if (form.WasCancelled || dialogResult != DialogResult.OK)
+                    {
+                        Logger.Info("User cancelled the license generation form");
+                        return new LicenseGenerationResult { WasCancelled = true };
+                    }
+                    
+                    Logger.Info("User completed the license generation form");
+                    return new LicenseGenerationResult
+                    {
+                        LicenseKeyPath = form.LicenseKeyPath,
+                        CustomerId = form.CustomerId,
+                        LicenseNumber = form.LicenseNumber,
+                        ExpirationDate = form.ExpirationDate,
+                        WasCancelled = false
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error showing license generation form", ex);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine();
+                Console.WriteLine($"ERROR: Failed to show license generation form: {ex.Message}");
+                Console.ResetColor();
+                return new LicenseGenerationResult { WasCancelled = true };
+            }
+        }
+
+        static bool GenerateLicenseFromForm(LicenseGenerationResult formData)
+        {
+            try
+            {
+                Logger.Info($"Generating license from form data");
+                Logger.Info($"  License key file: {formData.LicenseKeyPath}");
                 
                 // Read license.key file
-                var keyLines = File.ReadAllLines(licenseKeyPath);
+                var keyLines = File.ReadAllLines(formData.LicenseKeyPath);
                 var keyData = new Dictionary<string, string>();
 
                 foreach (var line in keyLines)
@@ -823,73 +859,30 @@ namespace DigiSign
                 if (!keyData.ContainsKey("DeviceID"))
                 {
                     Logger.Error("Invalid license.key file - missing DeviceID");
-                    Console.WriteLine("Error: Invalid license.key file - missing DeviceID.");
+                    MessageBox.Show("Invalid license.key file - missing DeviceID.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return false;
                 }
 
                 string deviceId = keyData["DeviceID"];
-                string machineName = keyData.ContainsKey("MachineName") ? keyData["MachineName"] : "Unknown";
-
+                
                 Logger.Debug($"Device ID from key: {deviceId}");
-                Logger.Debug($"Machine Name: {machineName}");
-
-                Console.WriteLine();
-                Console.WriteLine($"Device ID: {deviceId}");
-                Console.WriteLine($"Machine Name: {machineName}");
-                Console.WriteLine();
-
-                // Get license details from admin
-                Console.Write("Enter Customer ID: ");
-                string customerId = Console.ReadLine()?.Trim();
-                if (string.IsNullOrWhiteSpace(customerId))
-                {
-                    Logger.Error("Customer ID cannot be empty");
-                    Console.WriteLine("Error: Customer ID cannot be empty.");
-                    return false;
-                }
-
-                Console.Write("Enter License Number: ");
-                string licenseNumber = Console.ReadLine()?.Trim();
-                if (string.IsNullOrWhiteSpace(licenseNumber))
-                {
-                    Logger.Error("License Number cannot be empty");
-                    Console.WriteLine("Error: License Number cannot be empty.");
-                    return false;
-                }
-
-                Console.Write("Enter Expiration Date (YYYY-MM-DD): ");
-                string validUntilStr = Console.ReadLine()?.Trim();
-                if (!DateTime.TryParse(validUntilStr, out DateTime validUntil))
-                {
-                    Logger.Error($"Invalid date format: {validUntilStr}");
-                    Console.WriteLine("Error: Invalid date format.");
-                    return false;
-                }
-
-                if (validUntil <= DateTime.Now)
-                {
-                    Logger.Error($"Expiration date is in the past: {validUntil:yyyy-MM-dd}");
-                    Console.WriteLine("Error: Expiration date must be in the future.");
-                    return false;
-                }
-
-                Logger.Debug($"Customer ID: {customerId}");
-                Logger.Debug($"License Number: {licenseNumber}");
-                Logger.Debug($"Valid Until: {validUntil:yyyy-MM-dd}");
+                Logger.Debug($"Customer ID: {formData.CustomerId}");
+                Logger.Debug($"License Number: {formData.LicenseNumber}");
+                Logger.Debug($"Valid Until: {formData.ExpirationDate:yyyy-MM-dd}");
 
                 // Generate device hash
-                string deviceHash = GenerateDeviceHash(deviceId, licenseNumber);
+                string deviceHash = GenerateDeviceHash(deviceId, formData.LicenseNumber);
                 Logger.Debug($"Generated Device Hash: {deviceHash}");
 
                 // Create license.txt in the same directory as license.key
-                string outputDir = Path.GetDirectoryName(licenseKeyPath);
+                string outputDir = Path.GetDirectoryName(formData.LicenseKeyPath);
                 string licensePath = Path.Combine(outputDir, "license.txt");
 
                 var licenseContent = new StringBuilder();
-                licenseContent.AppendLine($"CustomerID={customerId}");
-                licenseContent.AppendLine($"ValidUntil={validUntil:yyyy-MM-dd}");
+                licenseContent.AppendLine($"CustomerID={formData.CustomerId}");
+                licenseContent.AppendLine($"ValidUntil={formData.ExpirationDate:yyyy-MM-dd}");
                 licenseContent.AppendLine($"DeviceID={deviceId}");
-                licenseContent.AppendLine($"LicenseNumber={licenseNumber}");
+                licenseContent.AppendLine($"LicenseNumber={formData.LicenseNumber}");
                 licenseContent.AppendLine($"DeviceHash={deviceHash}");
 
                 File.WriteAllText(licensePath, licenseContent.ToString());
@@ -898,9 +891,9 @@ namespace DigiSign
                 Console.WriteLine();
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
                 Console.WriteLine("License Details:");
-                Console.WriteLine($"  Customer ID: {customerId}");
-                Console.WriteLine($"  License Number: {licenseNumber}");
-                Console.WriteLine($"  Valid Until: {validUntil:yyyy-MM-dd}");
+                Console.WriteLine($"  Customer ID: {formData.CustomerId}");
+                Console.WriteLine($"  License Number: {formData.LicenseNumber}");
+                Console.WriteLine($"  Valid Until: {formData.ExpirationDate:yyyy-MM-dd}");
                 Console.WriteLine($"  Device ID: {deviceId}");
                 Console.WriteLine($"  Output File: {licensePath}");
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
@@ -909,9 +902,51 @@ namespace DigiSign
             }
             catch (Exception ex)
             {
-                Logger.Error("Error generating license from key", ex);
+                Logger.Error("Error generating license from form data", ex);
                 Console.WriteLine($"Error generating license: {ex.Message}");
+                MessageBox.Show($"Error generating license: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
+            }
+        }
+
+        static string PromptForLicenseKeyPath()
+        {
+            try
+            {
+                Logger.Debug("Showing GUI dialog for license key path");
+                
+                using (var dialog = new OpenFileDialog())
+                {
+                    dialog.Title = "Select license.key File";
+                    dialog.Filter = "License Key Files (*.key)|*.key|All Files (*.*)|*.*";
+                    dialog.DefaultExt = "key";
+                    dialog.FileName = "license.key";
+                    dialog.InitialDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                    dialog.CheckFileExists = true;
+                    dialog.CheckPathExists = true;
+                    
+                    Logger.Debug("OpenFileDialog configured, showing to user");
+                    
+                    if (dialog.ShowDialog() == DialogResult.OK)
+                    {
+                        Logger.Info($"User selected file: {dialog.FileName}");
+                        return dialog.FileName;
+                    }
+                    else
+                    {
+                        Logger.Info("User cancelled file selection dialog");
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error showing file selection dialog", ex);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine();
+                Console.WriteLine($"ERROR: Failed to show file selection dialog: {ex.Message}");
+                Console.ResetColor();
+                return null;
             }
         }
 
