@@ -26,7 +26,7 @@ namespace DigiSign
         private void InitializeComponents()
         {
             // Form settings
-            this.Text = "DigiSign - Verbose Progress";
+            this.Text = $"{VersionInfo.TitleWithVersion} - Verbose Progress";
             this.ClientSize = new Size(900, 700);
             this.MinimumSize = new Size(800, 600);
             this.StartPosition = FormStartPosition.CenterScreen;

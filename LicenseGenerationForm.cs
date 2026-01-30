@@ -104,6 +104,9 @@ namespace DigiSign
         
         // XML file path
         private string xmlFilePath;
+        
+        // Mode flags
+        private bool settingsOnlyMode = false;
 
         // Public properties
         public string LicenseKeyPath { get; private set; }
@@ -112,8 +115,9 @@ namespace DigiSign
         public DateTime ExpirationDate { get; private set; }
         public bool WasCancelled { get; private set; }
 
-        public LicenseGenerationForm()
+        public LicenseGenerationForm(bool settingsOnly = false)
         {
+            settingsOnlyMode = settingsOnly;
             xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             InitializeComponents();
             LoadSettings();
@@ -123,7 +127,9 @@ namespace DigiSign
         private void InitializeComponents()
         {
             // Form settings
-            this.Text = "DigiSign - Admin Panel";
+            this.Text = settingsOnlyMode 
+                ? $"{VersionInfo.TitleWithVersion} - Settings" 
+                : $"{VersionInfo.TitleWithVersion} - Admin Panel";
             this.ClientSize = new Size(800, 650);
             this.MinimumSize = new Size(800, 650);
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -138,7 +144,9 @@ namespace DigiSign
             // Title
             lblTitle = new Label
             {
-                Text = "DigiSign Administration",
+                Text = settingsOnlyMode 
+                    ? $"{VersionInfo.TitleWithVersion} - PDF Signing Settings" 
+                    : $"{VersionInfo.TitleWithVersion} - Administration",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 Location = new Point(margin, currentY),
                 Size = new Size(760, 35),
@@ -169,9 +177,18 @@ namespace DigiSign
             };
             this.Controls.Add(tabControl);
             
-            // Create tabs
-            CreateLicenseGenerationTab();
+            // Create tabs - only include License tab if NOT in settings-only mode
+            if (!settingsOnlyMode)
+            {
+                CreateLicenseGenerationTab();
+            }
             CreateSettingsTab();
+            
+            // Select Settings tab by default in settings-only mode
+            if (settingsOnlyMode && tabControl.TabPages.Count > 0)
+            {
+                tabControl.SelectedIndex = 0; // Settings tab is first when license tab is hidden
+            }
         }
         
         private void CreateLicenseGenerationTab()
@@ -354,9 +371,12 @@ namespace DigiSign
             btnGenerate.Click += BtnGenerate_Click;
             tabLicense.Controls.Add(btnGenerate);
             
-            // Set form button defaults
-            this.AcceptButton = btnGenerate;
-            this.CancelButton = btnCancel;
+            // Set form button defaults (only in admin mode, not settings-only mode)
+            if (!settingsOnlyMode)
+            {
+                this.AcceptButton = btnGenerate;
+                this.CancelButton = btnCancel;
+            }
         }
         
         private void CreateSettingsTab()

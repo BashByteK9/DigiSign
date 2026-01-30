@@ -19,9 +19,95 @@ using Spire.Pdf.Graphics;
 using System.Security.AccessControl;
 using System.Text;
 using System.Management;
+using System.Reflection;
 
 namespace DigiSign
 {
+    /// <summary>
+    /// Version information helper class with auto-incrementing build number
+    /// </summary>
+    public static class VersionInfo
+    {
+        private static readonly System.Version _assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        private static readonly DateTime _buildDate = GetBuildDate(Assembly.GetExecutingAssembly());
+        
+        /// <summary>
+        /// Gets the build date from the assembly
+        /// </summary>
+        private static DateTime GetBuildDate(Assembly assembly)
+        {
+            const string BuildVersionMetadataPrefix = "+build";
+            
+            var attribute = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+            if (attribute?.InformationalVersion != null)
+            {
+                var value = attribute.InformationalVersion;
+                var index = value.IndexOf(BuildVersionMetadataPrefix);
+                if (index > 0)
+                {
+                    value = value.Substring(index + BuildVersionMetadataPrefix.Length);
+                    if (DateTime.TryParseExact(value, "yyyyMMddHHmmss", null, System.Globalization.DateTimeStyles.None, out var result))
+                    {
+                        return result;
+                    }
+                }
+            }
+            
+            // Fallback: Use assembly file's last write time
+            return File.GetLastWriteTime(assembly.Location);
+        }
+        
+        /// <summary>
+        /// Gets the calculated build number based on date (days since 2000-01-01)
+        /// </summary>
+        private static int BuildNumber
+        {
+            get
+            {
+                var baseDate = new DateTime(2000, 1, 1);
+                var days = (int)(_buildDate - baseDate).TotalDays;
+                return days;
+            }
+        }
+        
+        /// <summary>
+        /// Gets the calculated revision number (seconds since midnight / 2)
+        /// </summary>
+        private static int RevisionNumber
+        {
+            get
+            {
+                var midnight = _buildDate.Date;
+                var seconds = (int)(_buildDate - midnight).TotalSeconds;
+                return seconds / 2;
+            }
+        }
+        
+        /// <summary>
+        /// Gets the full version string (e.g., "1.0.9145.31234")
+        /// </summary>
+        public static string FullVersion => $"{_assemblyVersion.Major}.{_assemblyVersion.Minor}.{BuildNumber}.{RevisionNumber}";
+        
+        /// <summary>
+        /// Gets the short version string (e.g., "1.0.9145")
+        /// </summary>
+        public static string ShortVersion => $"{_assemblyVersion.Major}.{_assemblyVersion.Minor}.{BuildNumber}";
+        
+        /// <summary>
+        /// Gets the version for display in title bars (e.g., "v1.0.9145")
+        /// </summary>
+        public static string DisplayVersion => $"v{ShortVersion}";
+        
+        /// <summary>
+        /// Gets the application title with version (e.g., "DigiSign v1.0.9145")
+        /// </summary>
+        public static string TitleWithVersion => $"DigiSign {DisplayVersion}";
+        
+        /// <summary>
+        /// Gets the build date and time
+        /// </summary>
+        public static string BuildDate => _buildDate.ToString("yyyy-MM-dd HH:mm:ss");
+    }
 
     public class XmlData
     {
@@ -242,7 +328,8 @@ namespace DigiSign
             
             // Initialize logger first
             Logger.Initialize();
-            Logger.Info("Application started");
+            Logger.Info($"Application started - {VersionInfo.TitleWithVersion}");
+            Logger.Info($"Version: {VersionInfo.FullVersion} | Build Date: {VersionInfo.BuildDate}");
             Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
 
             System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
@@ -252,64 +339,102 @@ namespace DigiSign
             Logger.Debug($"License file path: {licensePath}");
             Logger.Debug($"XML configuration file path: {xmlFilePath}");
             
-            // Read XML data first to check verbose mode setting
-            var xmlData = ReadXmlData(xmlFilePath);
-            
-            // Check for verbose mode from command line OR from XML settings
-            bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
-            bool xmlVerbose = xmlData?.VerboseMode ?? false;
-            isVerboseMode = cmdLineVerbose || xmlVerbose;
-            shouldAutoClose = isVerboseMode;
-
-            if (isVerboseMode)
-            {
-                if (cmdLineVerbose)
-                    Logger.Info("Verbose mode enabled via command line");
-                if (xmlVerbose)
-                    Logger.Info("Verbose mode enabled via IP.xml settings");
-                
-                // Create and show verbose progress form
-                verboseForm = new VerboseProgressForm();
-                verboseForm.Show();
-                verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
-                verboseForm.AppendText("DigiSign - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
-                verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
-                
-                if (xmlVerbose)
-                {
-                    verboseForm.AppendText("Verbose mode enabled from IP.xml configuration\n", Color.Green, false);
-                }
-                if (cmdLineVerbose)
-                {
-                    verboseForm.AppendText("Verbose mode enabled from command line\n", Color.Green, false);
-                }
-                verboseForm.AppendText("\n", Color.Black, false);
-                
-                Application.DoEvents(); // Process form events
-            }
-            
-            if (isVerboseMode)
-            {
-                verboseForm.UpdateProgress(1, "Initializing application...");
-                verboseForm.AppendDetail($"Base Directory: {AppDomain.CurrentDomain.BaseDirectory}");
-                Application.DoEvents();
-            }
-            
-            if (isVerboseMode)
-            {
-                verboseForm.UpdateProgress(2, "Loading configuration...");
-                verboseForm.AppendDetail($"License file: {Path.GetFileName(licensePath)}");
-                verboseForm.AppendDetail($"Config file: {Path.GetFileName(xmlFilePath)}");
-                Application.DoEvents();
-            }
-            
-            int totalErrorCount = 0; // Track ALL errors (validation, signing, etc.) for auto-close timing
-
             // Declare adminLicensePath once for the entire method scope
             string adminLicensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "admin.license");
 
-            // Check if admin mode is requested
+            // Check if admin mode or settings mode is requested FIRST (before verbose mode check)
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
+            bool isSettingsMode = args.Length > 0 && args[0].Equals("/settings", StringComparison.OrdinalIgnoreCase);
+            
+            // Read XML data first to check verbose mode setting
+            var xmlData = ReadXmlData(xmlFilePath);
+            
+            // Only enable verbose mode if NOT in admin mode or settings mode
+            // Admin mode and settings mode are for configuration only, not PDF signing
+            if (!isAdminMode && !isSettingsMode)
+            {
+                // Check for verbose mode from command line OR from XML settings
+                bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
+                bool xmlVerbose = xmlData?.VerboseMode ?? false;
+                isVerboseMode = cmdLineVerbose || xmlVerbose;
+                shouldAutoClose = isVerboseMode;
+
+                if (isVerboseMode)
+                {
+                    if (cmdLineVerbose)
+                        Logger.Info("Verbose mode enabled via command line");
+                    if (xmlVerbose)
+                        Logger.Info("Verbose mode enabled via IP.xml settings");
+                    
+                    // Create and show verbose progress form
+                    verboseForm = new VerboseProgressForm();
+                    verboseForm.Show();
+                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
+                    verboseForm.AppendText($"{VersionInfo.TitleWithVersion} - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
+                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
+                    
+                    if (xmlVerbose)
+                    {
+                        verboseForm.AppendText("Verbose mode enabled from IP.xml configuration\n", Color.Green, false);
+                    }
+                    if (cmdLineVerbose)
+                    {
+                        verboseForm.AppendText("Verbose mode enabled from command line\n", Color.Green, false);
+                    }
+                    verboseForm.AppendText("\n", Color.Black, false);
+                    
+                    Application.DoEvents(); // Process form events
+                }
+                
+                if (isVerboseMode)
+                {
+                    verboseForm.UpdateProgress(1, "Initializing application...");
+                    verboseForm.AppendDetail($"Base Directory: {AppDomain.CurrentDomain.BaseDirectory}");
+                    Application.DoEvents();
+                }
+                
+                if (isVerboseMode)
+                {
+                    verboseForm.UpdateProgress(2, "Loading configuration...");
+                    verboseForm.AppendDetail($"License file: {Path.GetFileName(licensePath)}");
+                    verboseForm.AppendDetail($"Config file: {Path.GetFileName(xmlFilePath)}");
+                    Application.DoEvents();
+                }
+            }
+            else
+            {
+                // Admin mode or settings mode - verbose mode is not applicable
+                if (isAdminMode)
+                    Logger.Info("Admin mode - verbose mode disabled");
+                else
+                    Logger.Info("Settings mode - verbose mode disabled");
+                    
+                isVerboseMode = false;
+                shouldAutoClose = false;
+            }
+            
+            int totalErrorCount = 0; // Track ALL errors (validation, signing, etc.) for auto-close timing
+            bool hasSuccessfulSigning = false; // Track if any PDFs were successfully signed
+            string plfSuccessMessage = ""; // Message for PLF log
+
+            // Handle settings mode (no admin license required)
+            if (isSettingsMode)
+            {
+                // SETTINGS MODE: No license required - just show settings panel
+                Logger.Info("Settings mode requested - showing settings panel (no license required)");
+                
+                Console.WriteLine();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine($"⚙ {VersionInfo.TitleWithVersion} - Settings Configuration Mode");
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine();
+                Console.WriteLine("Opening settings panel...");
+                Console.WriteLine();
+                
+                // Show settings panel without license requirement
+                RunSettingsMode();
+                return; // Exit after settings mode completes
+            }
 
             if (isAdminMode)
             {
@@ -354,7 +479,7 @@ namespace DigiSign
                 Logger.Info("Valid admin license detected - proceeding with license generation");
                 Console.WriteLine();
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("🔑 Admin License Generation Mode");
+                Console.WriteLine($"🔑 {VersionInfo.TitleWithVersion} - Admin License Generation Mode");
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
                 
                 // Continue with admin license generation logic...
@@ -621,6 +746,7 @@ namespace DigiSign
                         // Process each PDF file
                         int successCount = 0;
                         int failCount = 0;
+                        List<string> successfulFiles = new List<string>(); // Track successful files
                         
                         for (int i = 0; i < validPdfFiles.Count; i++)
                         {
@@ -643,6 +769,7 @@ namespace DigiSign
                             {
                                 SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath);
                                 successCount++;
+                                successfulFiles.Add(outputFileName); // Track successful file
                                 Logger.Info($"Successfully signed: {inputFileName}");
                                 
                                 if (isVerboseMode)
@@ -670,6 +797,13 @@ namespace DigiSign
 
                         Logger.LogSeparator();
                         Logger.Info($"PDF signing completed - Success: {successCount}, Failed: {failCount}");
+                        
+                        // Store success info for PLF logging later (after verbose dialog closes)
+                        hasSuccessfulSigning = successCount > 0;
+                        if (successCount >= 1)
+                        {
+                            plfSuccessMessage = $"File(s) Signed Successfully - {successfulFiles[0]}";
+                        }
                         
                         // Add PDF signing failures to total error count
                         totalErrorCount += failCount;
@@ -790,7 +924,35 @@ namespace DigiSign
                 Logger.Info($"Auto-closing (verbose mode) - Total errors: {totalErrorCount}");
                 verboseForm.ProcessingComplete(true, totalErrorCount); // Pass total error count for smart timing
                 Application.Run(verboseForm); // Keep form alive until auto-close
+                
+                // Write PLF log AFTER verbose dialog has closed
+                if (hasSuccessfulSigning && totalErrorCount == 0)
+                {
+                    Logger.LogToPlf(plfSuccessMessage, isError: false);
+                    Logger.Info("PLF success log written after verbose dialog closed");
+                }
+                else if (hasSuccessfulSigning && totalErrorCount > 0)
+                {
+                    // Partial success - some files signed, some failed
+                    Logger.LogToPlf($"{plfSuccessMessage} (with {totalErrorCount} error(s))", isError: false);
+                    Logger.Info("PLF partial success log written after verbose dialog closed");
+                }
                 return;
+            }
+            else if (!isVerboseMode)
+            {
+                // Non-verbose mode - write PLF log immediately
+                if (hasSuccessfulSigning && totalErrorCount == 0)
+                {
+                    Logger.LogToPlf(plfSuccessMessage, isError: false);
+                    Logger.Info("PLF success log written (non-verbose mode)");
+                }
+                else if (hasSuccessfulSigning && totalErrorCount > 0)
+                {
+                    // Partial success
+                    Logger.LogToPlf($"{plfSuccessMessage} (with {totalErrorCount} error(s))", isError: false);
+                    Logger.Info("PLF partial success log written (non-verbose mode)");
+                }
             }
         }
 
@@ -1341,6 +1503,43 @@ namespace DigiSign
                 return new LicenseGenerationResult { WasCancelled = true };
             }
         }
+        
+        static void RunSettingsMode()
+        {
+            // Settings mode - no license required
+            Logger.Info("Entering settings mode - no license required");
+            
+            Console.WriteLine("Opening settings panel...");
+            Console.WriteLine("Configure your PDF signing settings without requiring admin privileges.");
+            Console.WriteLine();
+            
+            try
+            {
+                Logger.Debug("Creating LicenseGenerationForm for settings only");
+                
+                using (var form = new LicenseGenerationForm(settingsOnly: true))
+                {
+                    Logger.Debug("Showing settings form");
+                    form.ShowDialog();
+                    Logger.Debug("Settings form closed");
+                }
+                
+                Console.WriteLine();
+                Console.WriteLine("Settings panel closed.");
+                Logger.Info("Settings mode completed");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error showing settings panel", ex);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine();
+                Console.WriteLine($"ERROR: Failed to show settings panel: {ex.Message}");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+            }
+        }
 
         static bool GenerateLicenseFromForm(LicenseGenerationResult formData)
         {
@@ -1825,7 +2024,7 @@ namespace DigiSign
                         );
 
                         Logger.Info($"PDF digitally signed successfully: {Path.GetFileName(outputPath)}");
-                        Logger.LogToPlf($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", isError: false);
+                        // Note: PLF log will be written after verbose dialog closes
                         
                         if (isVerboseMode)
                         {

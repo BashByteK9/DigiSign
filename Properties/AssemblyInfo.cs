@@ -29,5 +29,9 @@ using System.Runtime.InteropServices;
 //      Build Number
 //      Revision
 //
+// Version is auto-incremented based on build date/time
+// Format: Major.Minor.Build where Build = (Year-2000)*366 + DayOfYear
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
+
+

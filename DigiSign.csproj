@@ -151,6 +151,7 @@
     <None Include="ADMIN_MODE_GUIDE.md" />
     <None Include="ADMIN_MODE_IMPROVED_UX.md" />
     <None Include="ADMIN_MODE_UPDATE.md" />
+    <None Include="ADMIN_MODE_VERBOSE_FIX.md" />
     <None Include="ADMIN_MODE_WINDOWS_FORMS.md" />
     <None Include="App.config" />
     <None Include="APPLICATION_BEHAVIOR.md" />
@@ -189,11 +190,14 @@
     <None Include="PIN_DIALOG_FIX.md" />
     <None Include="PLF_FORMAT_UPDATE.md" />
     <None Include="PLF_LOG_FORMAT.md" />
+    <None Include="PLF_LOG_TIMING_FIX.md" />
     <None Include="PROMPT_TROUBLESHOOTING.md" />
     <None Include="RunAdminKeyTester.bat" />
     <None Include="SECURITY_FIX_ADMIN_LOGGING.md" />
     <None Include="SETTINGS_DIALOG_FEATURE.md" />
     <None Include="SETTINGS_FEATURE_SUMMARY.md" />
+    <None Include="SETTINGS_MODE_FEATURE.md" />
+    <None Include="SETTINGS_MODE_QUICK_REFERENCE.md" />
     <None Include="SETTINGS_UI_FIXES.md" />
     <None Include="TestAdminLicense.bat" />
     <None Include="TestAdminPrompt.bat" />
@@ -205,6 +209,7 @@
     <None Include="VERBOSE_MODE_QUICK_REFERENCE.md" />
     <None Include="VERBOSE_MODE_SETTING.md" />
     <None Include="VERBOSE_MODE_TROUBLESHOOTING.md" />
+    <None Include="VERSION_SYSTEM_DOCUMENTATION.md" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
