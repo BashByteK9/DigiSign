@@ -170,6 +170,7 @@
     <None Include="LOGGING_SYSTEM.md" />
     <None Include="LOGGING_UPDATE_SUMMARY.md" />
     <None Include="packages.config" />
+    <None Include="PIN_DIALOG_FIX.md" />
     <None Include="PLF_FORMAT_UPDATE.md" />
     <None Include="PLF_LOG_FORMAT.md" />
     <None Include="PROMPT_TROUBLESHOOTING.md" />

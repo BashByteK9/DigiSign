@@ -1563,28 +1563,33 @@ namespace DigiSign
 
                         if (CertificateMatchesCN(cert, commonName))
                         {
-                            if (cert.HasPrivateKey)
+                    if (cert.HasPrivateKey)
+                        {
+                            try
                             {
-                                try
+                                // Try to get the legacy private key for PIN setup
+                                if (cert.PrivateKey is RSACryptoServiceProvider rsaCsp && rsaCsp.CspKeyContainerInfo.HardwareDevice)
                                 {
-                                    using (var rsa = cert.GetRSAPrivateKey())
+                                    if (!string.IsNullOrEmpty(pin))
                                     {
-                                        if (rsa is RSACryptoServiceProvider rsaCsp && rsaCsp.CspKeyContainerInfo.HardwareDevice)
-                                        {
-                                            cert.SetPinForPrivateKey(pin);
-                                            Logger.Info("PIN set for hardware token certificate");
-                                        }
-                                        else
-                                        {
-                                            Logger.Debug("Certificate has private key, but not hardware token. No PIN set");
-                                        }
+                                        cert.SetPinForPrivateKey(pin);
+                                        Logger.Info("PIN set for hardware token certificate from IP.xml");
+                                    }
+                                    else
+                                    {
+                                        Logger.Warning("Hardware token detected but no PIN provided in IP.xml - user may be prompted");
                                     }
                                 }
-                                catch (CryptographicException ex)
+                                else
                                 {
-                                    Logger.Warning($"Unable to access private key: {ex.Message}");
+                                    Logger.Debug("Certificate has private key, but not hardware token. No PIN needed");
                                 }
                             }
+                            catch (CryptographicException ex)
+                            {
+                                Logger.Warning($"Unable to access private key: {ex.Message}");
+                            }
+                        }
 
                             Logger.Info($"Certificate matched CN='{commonName}': {cert.Subject}");
                             return cert;
@@ -1927,16 +1932,33 @@ namespace DigiSign
 
             public byte[] Sign(byte[] message)
             {
-
-                using (var rsa = _certificate.GetRSAPrivateKey())
+                // Use legacy PrivateKey property to work with PIN caching
+                if (_certificate.PrivateKey is RSACryptoServiceProvider rsaCsp)
                 {
-                    if (rsa == null)
-                        throw new InvalidOperationException("RSA private key not found.");
+                    Logger.Debug("Using RSACryptoServiceProvider for signing (supports PIN caching)");
+                    
+                    // Compute hash of the message
+                    using (var sha256 = SHA256.Create())
+                    {
+                        byte[] hash = sha256.ComputeHash(message);
+                        // Sign the hash using the private key (PIN already cached via SetPinForPrivateKey)
+                        return rsaCsp.SignHash(hash, CryptoConfig.MapNameToOID("SHA256"));
+                    }
+                }
+                else
+                {
+                    // Fallback to modern API if legacy provider not available
+                    Logger.Debug("Using GetRSAPrivateKey for signing");
+                    using (var rsa = _certificate.GetRSAPrivateKey())
+                    {
+                        if (rsa == null)
+                            throw new InvalidOperationException("RSA private key not found.");
 
-                    HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
+                        HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
 
-                    // Use Windows to handle the PIN prompt and signing
-                    return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
+                        // This may trigger PIN prompt if PIN not cached
+                        return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
+                    }
                 }
             }
         }
