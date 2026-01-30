@@ -43,6 +43,7 @@ namespace DigiSign
         private Label lblPin;
         private TextBox txtPin;
         private CheckBox chkShowPin;
+        private CheckBox chkVerboseMode;
         
         // Settings Tab - Signature
         private TabPage tabSignature;
@@ -531,6 +532,18 @@ namespace DigiSign
             };
             chkShowPin.CheckedChanged += ChkShowPin_CheckedChanged;
             tabGeneral.Controls.Add(chkShowPin);
+            currentY += 30;
+            
+            // Verbose Mode
+            chkVerboseMode = new CheckBox
+            {
+                Text = "Enable Verbose Mode (detailed signing logs)",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                ForeColor = Color.FromArgb(0, 102, 204)
+            };
+            tabGeneral.Controls.Add(chkVerboseMode);
         }
         
         private void CreateSignatureSettingsTab()
@@ -975,6 +988,17 @@ namespace DigiSign
                 {
                     cmbUseSelfSigned.SelectedIndex = 1;
                 }
+                
+                // Load verbose mode setting (index 11)
+                if (fileNameLists.Count > 11)
+                {
+                    string verboseMode = fileNameLists[11].Element("FILENAME")?.Value ?? "N";
+                    chkVerboseMode.Checked = verboseMode.ToUpper() == "Y";
+                }
+                else
+                {
+                    chkVerboseMode.Checked = false; // Default to not verbose
+                }
             }
             catch (Exception)
             {
@@ -995,6 +1019,7 @@ namespace DigiSign
             cmbSignOnPage.SelectedIndex = 2;
             cmbOpenOutputFolder.SelectedIndex = 0;
             cmbUseSelfSigned.SelectedIndex = 1;
+            chkVerboseMode.Checked = false; // Default to not verbose
         }
         
         private void BtnSaveSettings_Click(object sender, EventArgs e)
@@ -1053,6 +1078,10 @@ namespace DigiSign
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", cmbUseSelfSigned.SelectedIndex == 0 ? "Y" : "N"),
                                 new XComment(" USESELFSIGNED ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", chkVerboseMode.Checked ? "Y" : "N"),
+                                new XComment(" VerboseMode: Y=Enable detailed signing logs, N=Normal mode, default value=N ")
                             )
                         )
                     )

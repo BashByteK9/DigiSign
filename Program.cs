@@ -36,6 +36,7 @@ namespace DigiSign
         public string SignOnPage { get; set; } // F=First, E=Each, L=Last
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
         public bool UseSelfSigned { get; set; } = false;
+        public bool VerboseMode { get; set; } = false;
 
     }
 
@@ -229,18 +230,43 @@ namespace DigiSign
         [STAThread]
         static void Main(string[] args)
         {
+            // Set console encoding to UTF-8 to properly display special characters
+            try
+            {
+                Console.OutputEncoding = System.Text.Encoding.UTF8;
+            }
+            catch
+            {
+                // Silently fail if encoding cannot be set (e.g., when not running in console)
+            }
+            
             // Initialize logger first
             Logger.Initialize();
             Logger.Info("Application started");
             Logger.Debug($"Command line arguments: {string.Join(" ", args)}");
 
-            // Check for verbose mode
-            isVerboseMode = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
+            System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+            string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
+            
+            Logger.Debug($"License file path: {licensePath}");
+            Logger.Debug($"XML configuration file path: {xmlFilePath}");
+            
+            // Read XML data first to check verbose mode setting
+            var xmlData = ReadXmlData(xmlFilePath);
+            
+            // Check for verbose mode from command line OR from XML settings
+            bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
+            bool xmlVerbose = xmlData?.VerboseMode ?? false;
+            isVerboseMode = cmdLineVerbose || xmlVerbose;
             shouldAutoClose = isVerboseMode;
 
             if (isVerboseMode)
             {
-                Logger.Info("Verbose mode enabled");
+                if (cmdLineVerbose)
+                    Logger.Info("Verbose mode enabled via command line");
+                if (xmlVerbose)
+                    Logger.Info("Verbose mode enabled via IP.xml settings");
                 
                 // Create and show verbose progress form
                 verboseForm = new VerboseProgressForm();
@@ -248,12 +274,19 @@ namespace DigiSign
                 verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
                 verboseForm.AppendText("DigiSign - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
                 verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
+                
+                if (xmlVerbose)
+                {
+                    verboseForm.AppendText("Verbose mode enabled from IP.xml configuration\n", Color.Green, false);
+                }
+                if (cmdLineVerbose)
+                {
+                    verboseForm.AppendText("Verbose mode enabled from command line\n", Color.Green, false);
+                }
+                verboseForm.AppendText("\n", Color.Black, false);
+                
                 Application.DoEvents(); // Process form events
             }
-
-            System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
-            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
-            string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             
             if (isVerboseMode)
             {
@@ -261,9 +294,6 @@ namespace DigiSign
                 verboseForm.AppendDetail($"Base Directory: {AppDomain.CurrentDomain.BaseDirectory}");
                 Application.DoEvents();
             }
-            
-            Logger.Debug($"License file path: {licensePath}");
-            Logger.Debug($"XML configuration file path: {xmlFilePath}");
             
             if (isVerboseMode)
             {
@@ -273,8 +303,6 @@ namespace DigiSign
                 Application.DoEvents();
             }
             
-            
-            var xmlData = ReadXmlData(xmlFilePath);
             int totalErrorCount = 0; // Track ALL errors (validation, signing, etc.) for auto-close timing
 
             // Declare adminLicensePath once for the entire method scope
@@ -1501,6 +1529,14 @@ namespace DigiSign
                 {
                     string flag = fileNameLists[10].Element("FILENAME")?.Value.Trim().ToUpper();
                     xmlData.UseSelfSigned = (flag == "Y");
+                }
+                
+                // Optional index 11: VerboseMode flag
+                if (fileNameLists.Count > 11)
+                {
+                    string verboseFlag = fileNameLists[11].Element("FILENAME")?.Value.Trim().ToUpper();
+                    xmlData.VerboseMode = (verboseFlag == "Y");
+                    Logger.Debug($"VerboseMode from XML: {xmlData.VerboseMode}");
                 }
 
                 Logger.Info("XML configuration loaded successfully");

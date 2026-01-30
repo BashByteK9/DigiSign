@@ -222,27 +222,27 @@ namespace DigiSign
 
         public void AppendSuccess(string text)
         {
-            AppendText("        ? " + text + "\n", Color.Green);
+            AppendText("        \u2713 " + text + "\n", Color.Green); // ? checkmark
         }
 
         public void AppendError(string text)
         {
-            AppendText("        ? " + text + "\n", Color.Red);
+            AppendText("        \u2717 " + text + "\n", Color.Red); // ? cross mark
         }
 
         public void AppendWarning(string text)
         {
-            AppendText("        ? " + text + "\n", Color.Orange);
+            AppendText("        \u26A0 " + text + "\n", Color.Orange); // ? warning sign
         }
 
         public void AppendInfo(string text)
         {
-            AppendText("        • " + text + "\n", Color.Black);
+            AppendText("        \u2022 " + text + "\n", Color.Black); // • bullet point
         }
 
         public void AppendDetail(string text)
         {
-            AppendText("          " + text + "\n", Color.Gray);
+            AppendText("          \u2192 " + text + "\n", Color.Gray); // ? arrow
         }
 
         public void ShowSummary(int successCount, int failCount)
@@ -256,14 +256,14 @@ namespace DigiSign
             // Track if there are errors
             hasErrors = failCount > 0;
 
-            AppendText("\n???????????????????????????????????????????????????????????\n", Color.Gray, true);
+            AppendText("\n" + new string('\u2550', 50) + "\n", Color.Gray, true); // ? double horizontal line
             AppendText("SUMMARY:\n", Color.Black, true);
-            AppendText($"  ? Successful: {successCount}\n", Color.Green, true);
+            AppendText($"  \u2713 Successful: {successCount}\n", Color.Green, true); // ? checkmark
             if (failCount > 0)
             {
-                AppendText($"  ? Failed: {failCount}\n", Color.Red, true);
+                AppendText($"  \u2717 Failed: {failCount}\n", Color.Red, true); // ? cross mark
             }
-            AppendText("???????????????????????????????????????????????????????????\n", Color.Gray, true);
+            AppendText(new string('\u2550', 50) + "\n", Color.Gray, true); // ? double horizontal line
         }
 
         public void ProcessingComplete(bool autoClose = true, int errorCount = 0)
@@ -288,12 +288,13 @@ namespace DigiSign
                 // Use 15 seconds if there are errors, 2 seconds for success
                 autoCloseCountdown = hasErrors ? 15 : 2;
                 
+                
                 btnWait.Enabled = true; // Enable Stop button
                 btnWait.Text = $"Stop [{autoCloseCountdown}]"; // Show initial countdown
                 
                 if (hasErrors)
                 {
-                    AppendText($"\n? Errors detected ({errorCount} error{(errorCount > 1 ? "s" : "")}) - Auto-closing in {autoCloseCountdown} seconds...\n", Color.Orange);
+                    AppendText($"\n\u26A0 Errors detected ({errorCount} error{(errorCount > 1 ? "s" : "")}) - Auto-closing in {autoCloseCountdown} seconds...\n", Color.Orange); // ? warning
                     AppendText("Click 'Stop' button to prevent auto-close.\n", Color.Gray);
                 }
                 else
