@@ -3,8 +3,8 @@
 # This file enables license generation capabilities for administrators only
 
 # Required Fields:
-AdminID=ADMIN001
-AdminKey=<GENERATE_ADMIN_KEY>
+AdminID=TENINFOTECH
+AdminKey=4818D852959BED132E90B58D7219C9EC45891ADBA8D5A8D5264A6DDA910B4D48
 ValidUntil=2030-12-31
 
 # Instructions:

@@ -292,47 +292,131 @@ namespace DigiSign
             // Check if admin wants to generate license.txt from license.key
             // Only prompt if there are command line arguments indicating admin mode
             string adminLicensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "admin.license");
-            if (args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase) && 
-                File.Exists(adminLicensePath) && ValidateAdminLicense(adminLicensePath))
+            if (args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase))
             {
-                Logger.Info("Admin mode activated");
+                Logger.Info("Admin mode requested");
                 Console.WriteLine();
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("🔑 Admin License Mode");
+                Console.WriteLine("🔑 Admin License Generation Mode");
                 Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("Do you want to generate license.txt from a license.key file? (Y/N)");
-                string response = Console.ReadLine()?.Trim().ToUpper();
-                Logger.Debug($"Admin response: {response}");
                 
-                if (response == "Y")
+                // Check if admin license exists and is valid
+                if (!File.Exists(adminLicensePath))
                 {
-                    Console.Write("Enter the path to license.key file: ");
-                    string userLicenseKeyPath = Console.ReadLine()?.Trim();
-                    Logger.Debug($"License key path provided: {userLicenseKeyPath}");
-                    
-                    if (!string.IsNullOrEmpty(userLicenseKeyPath) && File.Exists(userLicenseKeyPath))
-                    {
-                        if (GenerateLicenseFromKey(userLicenseKeyPath))
-                        {
-                            Console.WriteLine("✅ License file generated successfully!");
-                            Logger.Info($"License file generated successfully from: {userLicenseKeyPath}");
-                        }
-                        else
-                        {
-                            Console.WriteLine("❌ Failed to generate license file.");
-                            Logger.Error("Failed to generate license file");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine("❌ License key file not found.");
-                        Logger.Error($"License key file not found: {userLicenseKeyPath}");
-                    }
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("❌ ERROR: admin.license file not found!");
+                    Console.ResetColor();
                     Console.WriteLine();
+                    Console.WriteLine("To use admin mode, you need a valid admin.license file");
+                    Console.WriteLine($"in the application directory: {AppDomain.CurrentDomain.BaseDirectory}");
+                    Logger.Error("Admin mode failed: admin.license file not found");
+                    Console.WriteLine();
+                    Console.WriteLine("Press any key to exit...");
+                    Console.ReadKey();
+                    return;
                 }
                 
-                // Exit after admin operations
-                Logger.Info("Exiting admin mode");
+                if (!ValidateAdminLicense(adminLicensePath))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("❌ ERROR: Invalid or expired admin.license!");
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.WriteLine("Your admin license is either invalid or has expired.");
+                    Console.WriteLine("Please contact the administrator for a valid license.");
+                    Logger.Error("Admin mode failed: Invalid or expired admin.license");
+                    Console.WriteLine();
+                    Console.WriteLine("Press any key to exit...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                // Admin license is valid - proceed with license generation
+                Logger.Info("Admin license validated - entering license generation mode");
+                Console.WriteLine("✅ Admin license validated");
+                Console.WriteLine();
+                Console.WriteLine("This mode is ONLY for generating user licenses.");
+                Console.WriteLine("No PDF signing will be performed.");
+                Console.WriteLine();
+                Console.WriteLine("═══════════════════════════════════════════════════════════");
+                Console.WriteLine();
+                
+                Console.Write("Enter the path to license.key file (or press Enter to exit): ");
+                string userLicenseKeyPath = Console.ReadLine()?.Trim();
+                
+                if (string.IsNullOrEmpty(userLicenseKeyPath))
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("⚠️  License generation cancelled.");
+                    Logger.Info("Admin mode: User cancelled license generation");
+                    Console.WriteLine();
+                    Console.WriteLine("Press any key to exit...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                Logger.Debug($"License key path provided: {userLicenseKeyPath}");
+                
+                if (!File.Exists(userLicenseKeyPath))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine("❌ ERROR: License key file not found!");
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.WriteLine($"Path provided: {userLicenseKeyPath}");
+                    Console.WriteLine();
+                    Console.WriteLine("Please verify:");
+                    Console.WriteLine("  1. The file path is correct");
+                    Console.WriteLine("  2. The file exists at that location");
+                    Console.WriteLine("  3. You have permission to read the file");
+                    Console.WriteLine();
+                    Console.WriteLine("Example valid paths:");
+                    Console.WriteLine("  C:\\Users\\Admin\\Desktop\\license.key");
+                    Console.WriteLine("  D:\\Licenses\\user123\\license.key");
+                    Console.WriteLine("  .\\license.key (current directory)");
+                    Logger.Error($"License key file not found: {userLicenseKeyPath}");
+                    Console.WriteLine();
+                    Console.WriteLine("Press any key to exit...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                // Generate license from the key file
+                Console.WriteLine();
+                Console.WriteLine($"✅ License key file found: {Path.GetFileName(userLicenseKeyPath)}");
+                Console.WriteLine();
+                
+                if (GenerateLicenseFromKey(userLicenseKeyPath))
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine();
+                    Console.WriteLine("═══════════════════════════════════════════════════════════");
+                    Console.WriteLine("✅ LICENSE GENERATED SUCCESSFULLY!");
+                    Console.WriteLine("═══════════════════════════════════════════════════════════");
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.WriteLine("The license.txt file has been created in the same folder");
+                    Console.WriteLine("as the license.key file. Please send this file to the user.");
+                    Logger.Info($"License file generated successfully from: {userLicenseKeyPath}");
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine("❌ Failed to generate license file.");
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    Console.WriteLine("Please check:");
+                    Console.WriteLine("  1. The license.key file is valid");
+                    Console.WriteLine("  2. You have write permissions to the output folder");
+                    Console.WriteLine("  3. The application_log.txt for detailed error information");
+                    Logger.Error("Failed to generate license file");
+                }
+                
+                Console.WriteLine();
+                // Exit after admin operations - DO NOT process PDFs
+                Logger.Info("Exiting admin mode (no PDF processing)");
                 Logger.Info("Application ended");
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey();
@@ -652,7 +736,6 @@ namespace DigiSign
         {
             try
             {
-                Logger.Debug("Validating admin license");
                 var lines = File.ReadAllLines(adminLicensePath);
                 var adminData = new Dictionary<string, string>();
 
@@ -672,17 +755,14 @@ namespace DigiSign
                     !adminData.ContainsKey("AdminKey") || 
                     !adminData.ContainsKey("ValidUntil"))
                 {
-                    Logger.Warning("Admin license missing required fields");
+                    // Don't log details - security risk
                     return false;
                 }
-
-                Logger.Debug($"Admin ID: {adminData["AdminID"]}");
-                Logger.Debug($"Valid Until: {adminData["ValidUntil"]}");
 
                 // Validate expiration
                 if (DateTime.TryParse(adminData["ValidUntil"], out var validDate) && validDate < DateTime.Now)
                 {
-                    Logger.Warning($"Admin license expired on: {validDate:yyyy-MM-dd}");
+                    // Don't log details - security risk
                     Console.WriteLine("⚠️ Admin license has expired.");
                     return false;
                 }
@@ -691,17 +771,19 @@ namespace DigiSign
                 string expectedKey = GenerateAdminKey(adminData["AdminID"]);
                 if (adminData["AdminKey"] != expectedKey)
                 {
-                    Logger.Warning("Invalid admin license key");
+                    // Don't log details - security risk
                     Console.WriteLine("⚠️ Invalid admin license key.");
                     return false;
                 }
 
+                // Only log success, not failure details
                 Logger.Info("Admin license validated successfully");
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.Error("Error validating admin license", ex);
+                // Log exception but don't reveal validation logic
+                Logger.Error("Admin license validation failed", ex);
                 return false;
             }
         }

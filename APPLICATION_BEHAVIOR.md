@@ -84,15 +84,39 @@ The DigiSign application is designed to **ALWAYS execute and sign PDFs**, whethe
 - Run: `DigiSign.exe /admin`
 
 **Expected Behavior:**
-1. ? Application starts in Admin Mode
-2. ? Console shows: "?? Admin License Mode"
-3. ? Prompts: "Do you want to generate license.txt from a license.key file? (Y/N)"
-4. ? If Yes: Prompts for license.key path and generates license.txt
-5. ? If No: Exits
-6. ? Does NOT process PDFs (admin mode only generates licenses)
-7. ? Application waits for key press and exits
+1. ? Application starts in Admin License Generation Mode
+2. ? Validates admin.license file exists and is valid
+3. ? Shows message: "This mode is ONLY for generating user licenses. No PDF signing will be performed."
+4. ? Prompts for path to license.key file
+5. ? If empty path: Exits without error
+6. ? If file not found: Shows detailed error message with examples
+7. ? If file found: Generates license.txt in same folder as license.key
+8. ? Does NOT process PDFs (admin mode only generates licenses)
+9. ? Application exits after license generation
 
-**Result:** Admin license generation mode only (no PDF signing)
+**Error Cases:**
+- **No admin.license file:** Shows error "admin.license file not found" and exits
+- **Invalid admin.license:** Shows error "Invalid or expired admin.license" and exits  
+- **Empty path entered:** Shows "License generation cancelled" and exits
+- **license.key not found:** Shows detailed error with path examples and exits
+
+**Result:** Admin license generation mode only (PDF signing never occurs)
+
+---
+
+### Scenario 6: Admin Mode Without Valid Admin License
+**Setup:**
+- Run: `DigiSign.exe /admin` (without admin.license or with invalid one)
+
+**Expected Behavior:**
+1. ? Application starts in Admin Mode
+2. ? Admin license validation fails
+3. ?? Shows error: "admin.license file not found" OR "Invalid or expired admin.license"
+4. ? Application exits immediately
+5. ? No license generation occurs
+6. ? No PDF processing occurs
+
+**Result:** Error message shown, application exits safely
 
 ---
 
