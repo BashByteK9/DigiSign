@@ -350,12 +350,18 @@ namespace DigiSign
             
             // Check user license for PDF signing
             bool hasValidUserLicense = false;
+            int licenseExpiryDaysRemaining = -1; // Track days until expiry
+            
             if (File.Exists(licensePath))
             {
                 Logger.Info($"License file found at: {licensePath}");
                 if (ValidateLicense(licensePath))
                 {
                     hasValidUserLicense = true;
+                    
+                    // Get days remaining for expiry check
+                    licenseExpiryDaysRemaining = GetLicenseExpiryDays(licensePath);
+                    
                     Console.WriteLine("✅ License valid — Full Mode enabled.");
                     Logger.Info("License validation successful - Full Mode enabled");
                     if (isVerboseMode)
@@ -452,7 +458,20 @@ namespace DigiSign
             }
 
 
+
+
             Logger.Info("Application mode: FULL (valid user license)");
+            
+            // Show license expiration warning if expiring within 15 days
+            if (licenseExpiryDaysRemaining >= 0 && licenseExpiryDaysRemaining <= 15)
+            {
+                Logger.Info($"License expires in {licenseExpiryDaysRemaining} days - showing warning dialog");
+                ShowLicenseExpirationWarning(licenseExpiryDaysRemaining);
+            }
+            else if (licenseExpiryDaysRemaining > 15)
+            {
+                Logger.Debug($"License has {licenseExpiryDaysRemaining} days remaining - no warning needed");
+            }
             
             Logger.LogSeparator();
 
@@ -870,7 +889,8 @@ namespace DigiSign
                     return false;
                 }
 
-                string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber);
+                // CRITICAL: Include ValidUntil in hash to prevent date tampering
+                string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber, validUntil);
                 Logger.Debug($"Stored Hash:   {storedHash}");
                 Logger.Debug($"Computed Hash: {computedHash}");
                 
@@ -879,7 +899,11 @@ namespace DigiSign
                     Logger.Warning($"License validation failed: Device hash mismatch");
                     Logger.Warning($"  Expected Hash: {storedHash}");
                     Logger.Warning($"  Computed Hash: {computedHash}");
-                    Logger.Info("This usually means the license file has been tampered with or is corrupted.");
+                    Logger.Info("This usually means the license file has been tampered with.");
+                    Logger.Info("Common causes:");
+                    Logger.Info("  - ValidUntil date was manually changed");
+                    Logger.Info("  - License file was edited or corrupted");
+                    Logger.Info("  - License file is from a different device");
                     return false;
                 }
 
@@ -901,6 +925,16 @@ namespace DigiSign
                 Logger.Info($"  Customer ID: {(licenseData.ContainsKey("CustomerID") ? licenseData["CustomerID"] : "N/A")}");
                 Logger.Info($"  License Number: {licenseNumber}");
                 Logger.Info($"  Valid Until: {validDate:yyyy-MM-dd}");
+                
+                // Check if license is expiring soon (within 15 days)
+                TimeSpan timeUntilExpiry = validDate - DateTime.Now;
+                int daysRemaining = (int)timeUntilExpiry.TotalDays;
+                
+                if (daysRemaining <= 15 && daysRemaining > 0)
+                {
+                    Logger.Warning($"License expiring soon: {daysRemaining} days remaining");
+                }
+                
                 return true;
             }
             catch (Exception ex)
@@ -910,9 +944,10 @@ namespace DigiSign
             }
         }
 
-        static string GenerateDeviceHash(string deviceId, string licenseNumber)
+        static string GenerateDeviceHash(string deviceId, string licenseNumber, string validUntil)
         {
-            string data = deviceId + "|" + licenseNumber;
+            // Include ValidUntil in hash to prevent date tampering
+            string data = deviceId + "|" + licenseNumber + "|" + validUntil;
             using (SHA256 sha = SHA256.Create())
             {
                 byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
@@ -946,6 +981,84 @@ namespace DigiSign
             catch
             {
                 return "UNKNOWN_DEVICE";
+            }
+        }
+
+        static int GetLicenseExpiryDays(string filePath)
+        {
+            try
+            {
+                Logger.Debug($"Checking license expiry for: {filePath}");
+                var lines = File.ReadAllLines(filePath);
+                var licenseData = new Dictionary<string, string>();
+                
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    
+                    var parts = line.Split(new[] { '=' }, 2);
+                    if (parts.Length == 2)
+                    {
+                        licenseData[parts[0].Trim()] = parts[1].Trim();
+                    }
+                }
+
+                if (licenseData.ContainsKey("ValidUntil"))
+                {
+                    string validUntilStr = licenseData["ValidUntil"];
+                    Logger.Debug($"ValidUntil found: {validUntilStr}");
+                    
+                    if (DateTime.TryParse(validUntilStr, out var validDate))
+                    {
+                        TimeSpan timeUntilExpiry = validDate - DateTime.Now;
+                        int daysRemaining = (int)timeUntilExpiry.TotalDays;
+                        
+                        Logger.Debug($"License expires on: {validDate:yyyy-MM-dd}");
+                        Logger.Debug($"Current date: {DateTime.Now:yyyy-MM-dd}");
+                        Logger.Debug($"Days remaining: {daysRemaining}");
+                        
+                        return daysRemaining;
+                    }
+                    else
+                    {
+                        Logger.Warning($"Failed to parse ValidUntil date: {validUntilStr}");
+                    }
+                }
+                else
+                {
+                    Logger.Warning("ValidUntil field not found in license file");
+                }
+                
+                return -1; // Invalid or missing date
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error getting license expiry days", ex);
+                return -1;
+            }
+        }
+
+        static void ShowLicenseExpirationWarning(int daysRemaining)
+        {
+            try
+            {
+                Logger.Warning($"Showing license expiration warning: {daysRemaining} days remaining");
+                
+                string message = $"⚠️ LICENSE EXPIRATION WARNING ⚠️\n\n" +
+                                $"Your license will expire in {daysRemaining} day{(daysRemaining > 1 ? "s" : "")}.\n\n" +
+                                $"Please contact your administrator to renew your license\n" +
+                                $"before it expires to avoid service interruption.\n\n" +
+                                $"Click OK to continue.";
+                
+                string title = "License Expiring Soon";
+                
+                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                
+                Logger.Info("License expiration warning displayed to user");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to show license expiration warning", ex);
             }
         }
 
@@ -1237,9 +1350,11 @@ namespace DigiSign
                 Logger.Debug($"License Number: {formData.LicenseNumber}");
                 Logger.Debug($"Valid Until: {formData.ExpirationDate:yyyy-MM-dd}");
 
-                // Generate device hash
-                string deviceHash = GenerateDeviceHash(deviceId, formData.LicenseNumber);
+                // Generate device hash - IMPORTANT: Include ValidUntil to prevent date tampering
+                string validUntilStr = formData.ExpirationDate.ToString("yyyy-MM-dd");
+                string deviceHash = GenerateDeviceHash(deviceId, formData.LicenseNumber, validUntilStr);
                 Logger.Debug($"Generated Device Hash: {deviceHash}");
+                Logger.Info("Hash includes expiration date - prevents date tampering in license file");
 
                 // Create license.txt in the same directory as license.key
                 string outputDir = Path.GetDirectoryName(formData.LicenseKeyPath);
