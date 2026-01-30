@@ -38,125 +38,145 @@ namespace DigiSign
 
         private void InitializeComponents()
         {
-            // Form settings
+            // Form settings - LARGER and RESIZABLE
             this.Text = "DigiSign - Admin License Generation";
-            this.Size = new Size(600, 500);
+            this.ClientSize = new Size(750, 650);
+            this.MinimumSize = new Size(700, 600);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
+            this.FormBorderStyle = FormBorderStyle.Sizable;  // RESIZABLE
+            this.MaximizeBox = true;  // CAN MAXIMIZE
+            this.MinimizeBox = true;
             this.Icon = SystemIcons.Application;
+            this.AutoScroll = true;  // Auto scroll if needed
 
-            int leftMargin = 20;
-            int topMargin = 20;
-            int controlWidth = 540;
-            int labelHeight = 20;
-            int textBoxHeight = 25;
-            int spacing = 10;
+            int leftMargin = 25;
+            int rightMargin = 25;
+            int topMargin = 25;
+            int bottomMargin = 70;
+            int labelHeight = 22;
+            int textBoxHeight = 26;
+            int spacing = 12;
             int currentY = topMargin;
+
+            // Calculate control width dynamically
+            int GetControlWidth() => this.ClientSize.Width - leftMargin - rightMargin;
 
             // Title
             lblTitle = new Label
             {
                 Text = "Generate User License",
-                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, 30),
-                ForeColor = Color.FromArgb(0, 102, 204)
+                Size = new Size(GetControlWidth(), 35),
+                ForeColor = Color.FromArgb(0, 102, 204),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblTitle);
-            currentY += 40;
+            currentY += 45;
 
             // Separator
             Panel separator1 = new Panel
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, 2),
-                BackColor = Color.FromArgb(200, 200, 200)
+                Size = new Size(GetControlWidth(), 2),
+                BackColor = Color.FromArgb(200, 200, 200),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(separator1);
-            currentY += spacing + 5;
+            currentY += spacing + 8;
 
             // License Key Path
             lblLicenseKeyPath = new Label
             {
                 Text = "License Key File (*.key):",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Size = new Size(GetControlWidth(), labelHeight),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblLicenseKeyPath);
-            currentY += labelHeight + 5;
-
-            txtLicenseKeyPath = new TextBox
-            {
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth - 90, textBoxHeight),
-                ReadOnly = true,
-                BackColor = Color.White
-            };
-            this.Controls.Add(txtLicenseKeyPath);
+            currentY += labelHeight + 6;
 
             btnBrowse = new Button
             {
                 Text = "Browse...",
-                Location = new Point(leftMargin + controlWidth - 80, currentY - 1),
-                Size = new Size(80, textBoxHeight + 2)
+                Size = new Size(100, textBoxHeight + 2),
+                Font = new Font("Segoe UI", 9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             btnBrowse.Click += BtnBrowse_Click;
             this.Controls.Add(btnBrowse);
-            currentY += textBoxHeight + spacing + 10;
+
+            txtLicenseKeyPath = new TextBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(GetControlWidth() - 110, textBoxHeight),
+                ReadOnly = true,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            this.Controls.Add(txtLicenseKeyPath);
+
+            // Position browse button next to textbox
+            btnBrowse.Location = new Point(this.ClientSize.Width - rightMargin - 100, currentY - 1);
+            currentY += textBoxHeight + spacing + 12;
 
             // Device Info (read-only display)
             lblDeviceInfo = new Label
             {
                 Text = "Device Information:",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Size = new Size(GetControlWidth(), labelHeight),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblDeviceInfo);
-            currentY += labelHeight + 5;
+            currentY += labelHeight + 6;
 
             txtDeviceInfo = new TextBox
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, 60),
+                Size = new Size(GetControlWidth(), 80),
                 Multiline = true,
                 ReadOnly = true,
                 BackColor = Color.FromArgb(245, 245, 245),
-                Font = new Font("Courier New", 8),
-                ScrollBars = ScrollBars.Vertical
+                Font = new Font("Courier New", 9),
+                ScrollBars = ScrollBars.Vertical,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(txtDeviceInfo);
-            currentY += 70;
+            currentY += 92;
 
             // Separator
             Panel separator2 = new Panel
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, 2),
-                BackColor = Color.FromArgb(200, 200, 200)
+                Size = new Size(GetControlWidth(), 2),
+                BackColor = Color.FromArgb(200, 200, 200),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(separator2);
-            currentY += spacing + 5;
+            currentY += spacing + 8;
 
             // Customer ID
             lblCustomerId = new Label
             {
                 Text = "Customer ID: *",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Size = new Size(GetControlWidth(), labelHeight),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblCustomerId);
-            currentY += labelHeight + 5;
+            currentY += labelHeight + 6;
 
             txtCustomerId = new TextBox
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, textBoxHeight),
-                Font = new Font("Segoe UI", 9)
+                Size = new Size(GetControlWidth(), textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             txtCustomerId.TextChanged += ValidateForm;
             this.Controls.Add(txtCustomerId);
@@ -167,17 +187,19 @@ namespace DigiSign
             {
                 Text = "License Number: *",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Size = new Size(GetControlWidth(), labelHeight),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblLicenseNumber);
-            currentY += labelHeight + 5;
+            currentY += labelHeight + 6;
 
             txtLicenseNumber = new TextBox
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, textBoxHeight),
-                Font = new Font("Segoe UI", 9)
+                Size = new Size(GetControlWidth(), textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             txtLicenseNumber.TextChanged += ValidateForm;
             this.Controls.Add(txtLicenseNumber);
@@ -188,33 +210,35 @@ namespace DigiSign
             {
                 Text = "Expiration Date: *",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(controlWidth, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Size = new Size(GetControlWidth(), labelHeight),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             this.Controls.Add(lblExpirationDate);
-            currentY += labelHeight + 5;
+            currentY += labelHeight + 6;
 
             dtpExpirationDate = new DateTimePicker
             {
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(250, textBoxHeight),
-                Format = DateTimePickerFormat.Short,
+                Size = new Size(320, textBoxHeight),
+                Format = DateTimePickerFormat.Long,
                 MinDate = DateTime.Now.AddDays(1),
                 Value = DateTime.Now.AddYears(1),
-                Font = new Font("Segoe UI", 9)
+                Font = new Font("Segoe UI", 9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             dtpExpirationDate.ValueChanged += ValidateForm;
             this.Controls.Add(dtpExpirationDate);
-            currentY += textBoxHeight + spacing + 20;
 
-            // Buttons
+            // Buttons - Fixed at bottom
             btnCancel = new Button
             {
                 Text = "Cancel",
-                Location = new Point(leftMargin + controlWidth - 180, currentY),
-                Size = new Size(80, 32),
+                Size = new Size(110, 40),
                 DialogResult = DialogResult.Cancel,
-                Font = new Font("Segoe UI", 9)
+                Font = new Font("Segoe UI", 10),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                TabIndex = 5
             };
             btnCancel.Click += BtnCancel_Click;
             this.Controls.Add(btnCancel);
@@ -222,20 +246,41 @@ namespace DigiSign
             btnGenerate = new Button
             {
                 Text = "Generate License",
-                Location = new Point(leftMargin + controlWidth - 90, currentY),
-                Size = new Size(110, 32),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Size = new Size(150, 40),
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
                 BackColor = Color.FromArgb(0, 120, 215),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Enabled = false
+                Enabled = false,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                TabIndex = 6
             };
             btnGenerate.FlatAppearance.BorderSize = 0;
             btnGenerate.Click += BtnGenerate_Click;
             this.Controls.Add(btnGenerate);
 
+            // Position buttons at bottom
+            PositionButtons();
+            this.Resize += (s, e) => PositionButtons();
+
             this.CancelButton = btnCancel;
             this.AcceptButton = btnGenerate;
+        }
+
+        private void PositionButtons()
+        {
+            int rightMargin = 25;
+            int bottomMargin = 25;
+
+            btnGenerate.Location = new Point(
+                this.ClientSize.Width - rightMargin - btnGenerate.Width,
+                this.ClientSize.Height - bottomMargin - btnGenerate.Height
+            );
+
+            btnCancel.Location = new Point(
+                btnGenerate.Left - 10 - btnCancel.Width,
+                this.ClientSize.Height - bottomMargin - btnCancel.Height
+            );
         }
 
         private void BtnBrowse_Click(object sender, EventArgs e)
