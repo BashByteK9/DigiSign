@@ -14,92 +14,6 @@ using System.Reflection;
 
 namespace DigiSign
 {
-    /// <summary>
-    /// Version information helper class with auto-incrementing build number
-    /// </summary>
-    public static class VersionInfo
-    {
-        private static readonly System.Version _assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
-        private static readonly DateTime _buildDate = GetBuildDate(Assembly.GetExecutingAssembly());
-        
-        /// <summary>
-        /// Gets the build date from the assembly
-        /// </summary>
-        private static DateTime GetBuildDate(Assembly assembly)
-        {
-            const string BuildVersionMetadataPrefix = "+build";
-            
-            var attribute = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
-            if (attribute?.InformationalVersion != null)
-            {
-                var value = attribute.InformationalVersion;
-                var index = value.IndexOf(BuildVersionMetadataPrefix);
-                if (index > 0)
-                {
-                    value = value.Substring(index + BuildVersionMetadataPrefix.Length);
-                    if (DateTime.TryParseExact(value, "yyyyMMddHHmmss", null, System.Globalization.DateTimeStyles.None, out var result))
-                    {
-                        return result;
-                    }
-                }
-            }
-            
-            // Fallback: Use assembly file's last write time
-            return File.GetLastWriteTime(assembly.Location);
-        }
-        
-        /// <summary>
-        /// Gets the calculated build number based on date (days since 2000-01-01)
-        /// </summary>
-        private static int BuildNumber
-        {
-            get
-            {
-                var baseDate = new DateTime(2000, 1, 1);
-                var days = (int)(_buildDate - baseDate).TotalDays;
-                return days;
-            }
-        }
-        
-        /// <summary>
-        /// Gets the calculated revision number (seconds since midnight / 2)
-        /// </summary>
-        private static int RevisionNumber
-        {
-            get
-            {
-                var midnight = _buildDate.Date;
-                var seconds = (int)(_buildDate - midnight).TotalSeconds;
-                return seconds / 2;
-            }
-        }
-        
-        /// <summary>
-        /// Gets the full version string (e.g., "1.0.9145.31234")
-        /// </summary>
-        public static string FullVersion => $"{_assemblyVersion.Major}.{_assemblyVersion.Minor}.{BuildNumber}.{RevisionNumber}";
-        
-        /// <summary>
-        /// Gets the short version string (e.g., "1.0.9145")
-        /// </summary>
-        public static string ShortVersion => $"{_assemblyVersion.Major}.{_assemblyVersion.Minor}.{BuildNumber}";
-        
-        /// <summary>
-        /// Gets the version for display in title bars (e.g., "v1.0.9145")
-        /// </summary>
-        public static string DisplayVersion => $"v{ShortVersion}";
-        
-        /// <summary>
-        /// Gets the application title with version (e.g., "DigiSign v1.0.9145")
-        /// </summary>
-        public static string TitleWithVersion => $"DigiSign {DisplayVersion}";
-        
-        /// <summary>
-        /// Gets the build date and time
-        /// </summary>
-        public static string BuildDate => _buildDate.ToString("yyyy-MM-dd HH:mm:ss");
-    }
-
     public class XmlData
     {
         public List<string> InputFilePaths { get; set; } = new List<string>();
@@ -117,152 +31,6 @@ namespace DigiSign
 
     }
 
-
-
-    public enum LogLevel
-    {
-        DEBUG,
-        INFO,
-        WARNING,
-        ERROR,
-        CRITICAL
-    }
-
-    public static class Logger
-    {
-        private static readonly string LogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "application_log.txt");
-        private static readonly string PlfLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-        private static bool logInitialized = false;
-        private static readonly object logLock = new object();
-
-        public static void Initialize()
-        {
-            lock (logLock)
-            {
-                if (!logInitialized)
-                {
-                    try
-                    {
-                        // Create log header
-                        var header = new StringBuilder();
-                        header.AppendLine("═══════════════════════════════════════════════════════════");
-                        header.AppendLine($"DigiSign Application Log - Session Started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                        header.AppendLine($"Application Path: {AppDomain.CurrentDomain.BaseDirectory}");
-                        header.AppendLine($"Machine: {Environment.MachineName} | User: {Environment.UserName}");
-                        header.AppendLine($"OS: {Environment.OSVersion} | .NET: {Environment.Version}");
-                        header.AppendLine("═══════════════════════════════════════════════════════════");
-                        header.AppendLine();
-
-                        File.WriteAllText(LogFilePath, header.ToString());
-                        logInitialized = true;
-                        
-                        Log(LogLevel.INFO, "Logger initialized successfully");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Failed to initialize logger: {ex.Message}");
-                    }
-                }
-            }
-        }
-
-        public static void Log(LogLevel level, string message, Exception ex = null)
-        {
-            try
-            {
-                if (!logInitialized)
-                    Initialize();
-
-                lock (logLock)
-                {
-                    var logEntry = new StringBuilder();
-                    logEntry.Append($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                    logEntry.Append($" | {level,-8}");
-                    logEntry.Append($" | {message}");
-
-                    if (ex != null)
-                    {
-                        logEntry.AppendLine();
-                        logEntry.Append($"{"",23} | Exception: {ex.GetType().Name} - {ex.Message}");
-                        if (!string.IsNullOrEmpty(ex.StackTrace))
-                        {
-                            logEntry.AppendLine();
-                            logEntry.Append($"{"",23} | StackTrace: {ex.StackTrace.Replace(Environment.NewLine, Environment.NewLine + new string(' ', 23) + " | ")}");
-                        }
-                    }
-
-                    File.AppendAllText(LogFilePath, logEntry.ToString() + Environment.NewLine);
-
-                    // Also write to console for ERROR and CRITICAL
-                    if (level == LogLevel.ERROR || level == LogLevel.CRITICAL)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[{level}] {message}");
-                        if (ex != null)
-                            Console.WriteLine($"  → {ex.Message}");
-                        Console.ResetColor();
-                    }
-                    else if (level == LogLevel.WARNING)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine($"[{level}] {message}");
-                        Console.ResetColor();
-                    }
-                }
-            }
-            catch
-            {
-                // Silently fail to avoid breaking the application
-            }
-        }
-
-        public static void Debug(string message) => Log(LogLevel.DEBUG, message);
-        public static void Info(string message) => Log(LogLevel.INFO, message);
-        public static void Warning(string message) => Log(LogLevel.WARNING, message);
-        public static void Error(string message, Exception ex = null) => Log(LogLevel.ERROR, message, ex);
-        public static void Critical(string message, Exception ex = null) => Log(LogLevel.CRITICAL, message, ex);
-
-        public static void LogToPlf(string message, bool isError = false)
-        {
-            try
-            {
-                lock (logLock)
-                {
-                    // Write only the message to PLF file (no timestamp, no status prefix)
-                    File.WriteAllText(PlfLogFilePath, message + Environment.NewLine);
-                    
-                    // Still log to application log with full details
-                    if (isError)
-                        Error($"PLF Log: {message}");
-                    else
-                        Info($"PLF Log: {message}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Error("Failed to write to PLF log file", ex);
-            }
-        }
-
-        public static void LogSeparator()
-        {
-            try
-            {
-                if (!logInitialized)
-                    Initialize();
-
-                lock (logLock)
-                {
-                    File.AppendAllText(LogFilePath, new string('-', 80) + Environment.NewLine);
-                }
-            }
-            catch
-            {
-                // Silently fail
-            }
-        }
-    }
-
     internal class Program
     {
         // Global flag for verbose mode
@@ -273,16 +41,6 @@ namespace DigiSign
         [STAThread]
         static void Main(string[] args)
         {
-            // Set console encoding to UTF-8 to properly display special characters
-            try
-            {
-                Console.OutputEncoding = System.Text.Encoding.UTF8;
-            }
-            catch
-            {
-                // Silently fail if encoding cannot be set (e.g., when not running in console)
-            }
-            
             // Initialize logger first
             Logger.Initialize();
             Logger.Info($"Application started - {VersionInfo.TitleWithVersion}");
@@ -379,15 +137,7 @@ namespace DigiSign
             {
                 // SETTINGS MODE: No license required - just show settings panel
                 Logger.Info("Settings mode requested - showing settings panel (no license required)");
-                
-                Console.WriteLine();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine($"⚙ {VersionInfo.TitleWithVersion} - Settings Configuration Mode");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine();
-                Console.WriteLine("Opening settings panel...");
-                Console.WriteLine();
-                
+
                 // Show settings panel without license requirement
                 RunSettingsMode();
                 return; // Exit after settings mode completes
@@ -397,50 +147,32 @@ namespace DigiSign
             {
                 // ADMIN MODE: Only requires admin license, not user license
                 Logger.Info("Admin mode requested - checking for admin license");
-                
+
                 if (!File.Exists(adminLicensePath))
                 {
-                    Console.WriteLine();
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("═══════════════════════════════════════════════════════════");
-                    Console.WriteLine("ERROR: Admin license not found!");
-                    Console.WriteLine("═══════════════════════════════════════════════════════════");
-                    Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine($"Please ensure 'admin.license' file exists in: {AppDomain.CurrentDomain.BaseDirectory}");
-                    Console.WriteLine("Contact support for an admin license if you don't have one.");
-                    Console.WriteLine();
-                    Console.WriteLine("Press any key to exit...");
-                    Console.ReadKey();
+                    Logger.Error($"Admin license not found at: {adminLicensePath}");
+                    MessageBox.Show(
+                        $"Admin license not found!\n\nPlease ensure 'admin.license' file exists in:\n{AppDomain.CurrentDomain.BaseDirectory}\n\nContact support for an admin license if you don't have one.",
+                        "Admin License Not Found",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                     return;
                 }
 
-                if (!ValidateAdminLicense(adminLicensePath))
+                if (!LicenseManager.ValidateAdminLicense(adminLicensePath))
                 {
-                    Console.WriteLine();
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("═══════════════════════════════════════════════════════════");
-                    Console.WriteLine("ERROR: Invalid admin license!");
-                    Console.WriteLine("═══════════════════════════════════════════════════════════");
-                    Console.ResetColor();
-                    Console.WriteLine();
-                    Console.WriteLine("The admin.license file is invalid or corrupted.");
-                    Console.WriteLine("Contact support for a valid admin license.");
-                    Console.WriteLine();
-                    Console.WriteLine("Press any key to exit...");
-                    Console.ReadKey();
+                    Logger.Error("Invalid admin license");
+                    MessageBox.Show(
+                        "Invalid admin license!\n\nThe admin.license file is invalid or corrupted.\n\nContact support for a valid admin license.",
+                        "Invalid Admin License",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                     return;
                 }
 
                 // Admin license is valid, proceed with admin mode
                 Logger.Info("Valid admin license detected - proceeding with license generation");
-                Console.WriteLine();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine($"🔑 {VersionInfo.TitleWithVersion} - Admin License Generation Mode");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                
-                // Continue with admin license generation logic...
-                // (existing admin mode code will be here)
+
                 RunAdminMode(adminLicensePath);
                 return; // Exit after admin mode completes
             }
@@ -456,7 +188,7 @@ namespace DigiSign
             }
 
             // Check if admin license exists (for hint message later)
-            bool hasAdminLicense = File.Exists(adminLicensePath) && ValidateAdminLicense(adminLicensePath);
+            bool hasAdminLicense = File.Exists(adminLicensePath) && LicenseManager.ValidateAdminLicense(adminLicensePath);
             
             // Check user license for PDF signing
             bool hasValidUserLicense = false;
@@ -465,14 +197,13 @@ namespace DigiSign
             if (File.Exists(licensePath))
             {
                 Logger.Info($"License file found at: {licensePath}");
-                if (ValidateLicense(licensePath))
+                if (LicenseManager.ValidateLicense(licensePath))
                 {
                     hasValidUserLicense = true;
-                    
+
                     // Get days remaining for expiry check
-                    licenseExpiryDaysRemaining = GetLicenseExpiryDays(licensePath);
-                    
-                    Console.WriteLine("✅ License valid — Full Mode enabled.");
+                    licenseExpiryDaysRemaining = LicenseManager.GetLicenseExpiryDays(licensePath);
+
                     Logger.Info("License validation successful - Full Mode enabled");
                     if (isVerboseMode)
                     {
@@ -482,7 +213,6 @@ namespace DigiSign
                 }
                 else
                 {
-                    Console.WriteLine("❌ License invalid or used on a different device.");
                     Logger.Error("License validation failed - Cannot sign PDFs");
                     totalErrorCount++; // Count as error - PDF signing will fail
                     if (isVerboseMode)
@@ -494,7 +224,6 @@ namespace DigiSign
             }
             else
             {
-                Console.WriteLine("❌ License file not found.");
                 Logger.Error("License file not found - Cannot sign PDFs");
                 totalErrorCount++; // Count as error - PDF signing will fail
                 if (isVerboseMode)
@@ -507,44 +236,26 @@ namespace DigiSign
             // Exit if no valid user license (PDF signing requires valid user license)
             if (!hasValidUserLicense)
             {
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("ERROR: Valid user license required for PDF signing!");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.ResetColor();
-                Console.WriteLine();
-                Console.WriteLine("Please ensure you have a valid license.txt file.");
-                Console.WriteLine("Contact support for a license if you don't have one.");
-                Console.WriteLine();
-                
                 // Generate license.key file if it doesn't exist
                 string licenseKeyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.key");
                 if (!File.Exists(licenseKeyPath))
                 {
                     Logger.Info("Generating license.key file for user to send to admin");
-                    GenerateLicenseKeyFile(licenseKeyPath);
+                    LicenseManager.GenerateLicenseKeyFile(licenseKeyPath);
                 }
                 else
                 {
                     Logger.Info("license.key file already exists");
-                    Console.WriteLine($"📄 License key file exists at: {licenseKeyPath}");
-                    Console.WriteLine("   Send this file to your administrator to generate license.txt");
-                    Console.WriteLine();
                 }
-                
+
                 if (hasAdminLicense)
                 {
-                    Console.WriteLine("💡 Admin license detected. Use /admin flag to generate user licenses.");
-                    Console.WriteLine("   Example: DigiSign.exe /admin");
-                    Console.WriteLine();
-                    Console.WriteLine("Note: Admin licenses cannot be used for PDF signing.");
-                    Console.WriteLine();
+                    Logger.Info("Admin license detected but not running in admin mode");
                 }
-                
+
                 Logger.Error("Application terminated - No valid user license");
                 Logger.LogToPlf("Error: No valid user license - PDF signing aborted", isError: true);
-                
+
                 if (isVerboseMode)
                 {
                     verboseForm.AppendText("\n", Color.Black);
@@ -553,16 +264,18 @@ namespace DigiSign
                     verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Red, true);
                     verboseForm.AppendError("Application cannot continue without valid user license");
                     Application.DoEvents();
-                    
+
                     // Complete with error
                     verboseForm.ProcessingComplete(true, totalErrorCount);
                     Application.Run(verboseForm);
                 }
                 else
                 {
-                    Console.WriteLine();
-                    Console.WriteLine("Press any key to exit...");
-                    Console.ReadKey();
+                    MessageBox.Show(
+                        "Valid user license required for PDF signing!\n\nPlease ensure you have a valid license.txt file.\nContact support for a license if you don't have one.",
+                        "License Required",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                 }
                 return;
             }
@@ -571,26 +284,23 @@ namespace DigiSign
 
 
             Logger.Info("Application mode: FULL (valid user license)");
-            
+
             // Show license expiration warning if expiring within 15 days
             if (licenseExpiryDaysRemaining >= 0 && licenseExpiryDaysRemaining <= 15)
             {
                 Logger.Info($"License expires in {licenseExpiryDaysRemaining} days - showing warning dialog");
-                ShowLicenseExpirationWarning(licenseExpiryDaysRemaining);
+                LicenseManager.ShowLicenseExpirationWarning(licenseExpiryDaysRemaining);
             }
             else if (licenseExpiryDaysRemaining > 15)
             {
                 Logger.Debug($"License has {licenseExpiryDaysRemaining} days remaining - no warning needed");
             }
-            
+
             Logger.LogSeparator();
 
             // Show hint if user has admin license but didn't use /admin flag
-            if (File.Exists(adminLicensePath) && ValidateAdminLicense(adminLicensePath))
+            if (File.Exists(adminLicensePath) && LicenseManager.ValidateAdminLicense(adminLicensePath))
             {
-                Console.WriteLine("💡 Admin license detected. Run with /admin flag to generate licenses.");
-                Console.WriteLine("   Example: DigiSign.exe /admin");
-                Console.WriteLine();
                 Logger.Info("Admin license detected but not running in admin mode");
             }
 
@@ -954,427 +664,19 @@ namespace DigiSign
             Detail
         }
 
-        static bool ValidateLicense(string filePath)
-        {
-            try
-            {
-                Logger.Debug("Starting license validation");
-                var lines = File.ReadAllLines(filePath);
-                var licenseData = new Dictionary<string, string>();
-                
-                // Parse license file with validation
-                foreach (var line in lines)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    
-                    var parts = line.Split(new[] { '=' }, 2);
-                    if (parts.Length == 2)
-                    {
-                        licenseData[parts[0].Trim()] = parts[1].Trim();
-                    }
-                }
-
-                // Check all required keys exist
-                if (!licenseData.ContainsKey("DeviceID"))
-                {
-                    Logger.Warning("License validation failed: DeviceID field is missing");
-                    return false;
-                }
-                if (!licenseData.ContainsKey("DeviceHash"))
-                {
-                    Logger.Warning("License validation failed: DeviceHash field is missing");
-                    return false;
-                }
-                if (!licenseData.ContainsKey("LicenseNumber"))
-                {
-                    Logger.Warning("License validation failed: LicenseNumber field is missing");
-                    return false;
-                }
-                if (!licenseData.ContainsKey("ValidUntil"))
-                {
-                    Logger.Warning("License validation failed: ValidUntil field is missing");
-                    return false;
-                }
-
-                string storedDeviceId = licenseData["DeviceID"];
-                string storedHash = licenseData["DeviceHash"];
-                string licenseNumber = licenseData["LicenseNumber"];
-                string validUntil = licenseData["ValidUntil"];
-
-                Logger.Debug($"License Number: {licenseNumber}");
-                Logger.Debug($"Valid Until: {validUntil}");
-                Logger.Debug($"Stored Device ID: {storedDeviceId}");
-
-                // Validate that required values are not empty
-                if (string.IsNullOrWhiteSpace(storedDeviceId))
-                {
-                    Logger.Warning("License validation failed: DeviceID is empty");
-                    return false;
-                }
-                if (string.IsNullOrWhiteSpace(storedHash))
-                {
-                    Logger.Warning("License validation failed: DeviceHash is empty");
-                    return false;
-                }
-                if (string.IsNullOrWhiteSpace(licenseNumber))
-                {
-                    Logger.Warning("License validation failed: LicenseNumber is empty");
-                    return false;
-                }
-                if (string.IsNullOrWhiteSpace(validUntil))
-                {
-                    Logger.Warning("License validation failed: ValidUntil is empty");
-                    return false;
-                }
-
-                string currentDeviceId = GetDeviceId();
-                Logger.Debug($"Current Device ID: {currentDeviceId}");
-
-                if (storedDeviceId != currentDeviceId)
-                {
-                    Logger.Warning($"License validation failed: Device mismatch");
-                    Logger.Warning($"  License DeviceID: {storedDeviceId}");
-                    Logger.Warning($"  Current DeviceID: {currentDeviceId}");
-                    Logger.Info("TIP: This license was generated for a different computer. You need to:");
-                    Logger.Info("  1. Run the application on the original computer, OR");
-                    Logger.Info("  2. Generate a new license.key file on this computer");
-                    Logger.Info("  3. Send the new license.key to admin to generate a new license.txt");
-                    return false;
-                }
-
-                // CRITICAL: Include ValidUntil in hash to prevent date tampering
-                string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber, validUntil);
-                Logger.Debug($"Stored Hash:   {storedHash}");
-                Logger.Debug($"Computed Hash: {computedHash}");
-                
-                if (computedHash != storedHash)
-                {
-                    Logger.Warning($"License validation failed: Device hash mismatch");
-                    Logger.Warning($"  Expected Hash: {storedHash}");
-                    Logger.Warning($"  Computed Hash: {computedHash}");
-                    Logger.Info("This usually means the license file has been tampered with.");
-                    Logger.Info("Common causes:");
-                    Logger.Info("  - ValidUntil date was manually changed");
-                    Logger.Info("  - License file was edited or corrupted");
-                    Logger.Info("  - License file is from a different device");
-                    return false;
-                }
-
-                if (!DateTime.TryParse(validUntil, out var validDate))
-                {
-                    Logger.Warning($"License validation failed: Invalid date format: {validUntil}");
-                    return false;
-                }
-                
-                if (validDate < DateTime.Now)
-                {
-                    Logger.Warning($"License validation failed: License expired");
-                    Logger.Warning($"  Expiry date: {validDate:yyyy-MM-dd}");
-                    Logger.Warning($"  Current date: {DateTime.Now:yyyy-MM-dd}");
-                    return false;
-                }
-
-                Logger.Info("✅ License validation successful");
-                Logger.Info($"  Customer ID: {(licenseData.ContainsKey("CustomerID") ? licenseData["CustomerID"] : "N/A")}");
-                Logger.Info($"  License Number: {licenseNumber}");
-                Logger.Info($"  Valid Until: {validDate:yyyy-MM-dd}");
-                
-                // Check if license is expiring soon (within 15 days)
-                TimeSpan timeUntilExpiry = validDate - DateTime.Now;
-                int daysRemaining = (int)timeUntilExpiry.TotalDays;
-                
-                if (daysRemaining <= 15 && daysRemaining > 0)
-                {
-                    Logger.Warning($"License expiring soon: {daysRemaining} days remaining");
-                }
-                
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error validating license", ex);
-                return false;
-            }
-        }
-
-        static string GenerateDeviceHash(string deviceId, string licenseNumber, string validUntil)
-        {
-            // Include ValidUntil in hash to prevent date tampering
-            string data = deviceId + "|" + licenseNumber + "|" + validUntil;
-            using (SHA256 sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
-                return BitConverter.ToString(hash).Replace("-", "");
-            }
-        }
-
-        static string GetDeviceId()
-        {
-            try
-            {
-                string cpuId = "";
-                string diskId = "";
-
-                var cpuSearcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor");
-                foreach (var obj in cpuSearcher.Get())
-                {
-                    cpuId = obj["ProcessorId"]?.ToString();
-                    break;
-                }
-
-                var diskSearcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_DiskDrive");
-                foreach (var obj in diskSearcher.Get())
-                {
-                    diskId = obj["SerialNumber"]?.ToString();
-                    break;
-                }
-
-                return $"{cpuId}_{diskId}";
-            }
-            catch
-            {
-                return "UNKNOWN_DEVICE";
-            }
-        }
-
-        static int GetLicenseExpiryDays(string filePath)
-        {
-            try
-            {
-                Logger.Debug($"Checking license expiry for: {filePath}");
-                var lines = File.ReadAllLines(filePath);
-                var licenseData = new Dictionary<string, string>();
-                
-                foreach (var line in lines)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    
-                    var parts = line.Split(new[] { '=' }, 2);
-                    if (parts.Length == 2)
-                    {
-                        licenseData[parts[0].Trim()] = parts[1].Trim();
-                    }
-                }
-
-                if (licenseData.ContainsKey("ValidUntil"))
-                {
-                    string validUntilStr = licenseData["ValidUntil"];
-                    Logger.Debug($"ValidUntil found: {validUntilStr}");
-                    
-                    if (DateTime.TryParse(validUntilStr, out var validDate))
-                    {
-                        TimeSpan timeUntilExpiry = validDate - DateTime.Now;
-                        int daysRemaining = (int)timeUntilExpiry.TotalDays;
-                        
-                        Logger.Debug($"License expires on: {validDate:yyyy-MM-dd}");
-                        Logger.Debug($"Current date: {DateTime.Now:yyyy-MM-dd}");
-                        Logger.Debug($"Days remaining: {daysRemaining}");
-                        
-                        return daysRemaining;
-                    }
-                    else
-                    {
-                        Logger.Warning($"Failed to parse ValidUntil date: {validUntilStr}");
-                    }
-                }
-                else
-                {
-                    Logger.Warning("ValidUntil field not found in license file");
-                }
-                
-                return -1; // Invalid or missing date
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error getting license expiry days", ex);
-                return -1;
-            }
-        }
-
-        static void ShowLicenseExpirationWarning(int daysRemaining)
-        {
-            try
-            {
-                Logger.Warning($"Showing license expiration warning: {daysRemaining} days remaining");
-                
-                string message = $"⚠️ LICENSE EXPIRATION WARNING ⚠️\n\n" +
-                                $"Your license will expire in {daysRemaining} day{(daysRemaining > 1 ? "s" : "")}.\n\n" +
-                                $"Please contact your administrator to renew your license\n" +
-                                $"before it expires to avoid service interruption.\n\n" +
-                                $"Click OK to continue.";
-                
-                string title = "License Expiring Soon";
-                
-                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                
-                Logger.Info("License expiration warning displayed to user");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Failed to show license expiration warning", ex);
-            }
-        }
-
-        static void GenerateLicenseKeyFile(string licenseKeyPath)
-        {
-            try
-            {
-                if (File.Exists(licenseKeyPath))
-                {
-                    Logger.Info($"License key file already exists at: {licenseKeyPath}");
-                    Console.WriteLine($"📄 License key file already exists at: {licenseKeyPath}");
-                    return;
-                }
-
-                Logger.Info("Generating license key file");
-                string deviceId = GetDeviceId();
-                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                string machineName = Environment.MachineName;
-                string userName = Environment.UserName;
-
-                Logger.Debug($"Device ID: {deviceId}");
-                Logger.Debug($"Machine Name: {machineName}");
-                Logger.Debug($"User Name: {userName}");
-
-                var keyContent = new StringBuilder();
-                keyContent.AppendLine("# License Key File");
-                keyContent.AppendLine("# Share this file with your administrator to generate a license");
-                keyContent.AppendLine();
-                keyContent.AppendLine($"DeviceID={deviceId}");
-                keyContent.AppendLine($"MachineName={machineName}");
-                keyContent.AppendLine($"UserName={userName}");
-                keyContent.AppendLine($"GeneratedOn={timestamp}");
-
-                File.WriteAllText(licenseKeyPath, keyContent.ToString());
-                Logger.Info($"License key file created successfully: {licenseKeyPath}");
-
-                Console.WriteLine();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("📄 License Key File Generated");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine($"Location: {licenseKeyPath}");
-                Console.WriteLine($"Device ID: {deviceId}");
-                Console.WriteLine();
-                Console.WriteLine("Please share the license.key file with your administrator");
-                Console.WriteLine("to generate a valid license.txt file.");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error generating license key file", ex);
-                Console.WriteLine($"Error generating license key file: {ex.Message}");
-            }
-        }
-
-        static bool ValidateAdminLicense(string adminLicensePath)
-        {
-            try
-            {
-                var lines = File.ReadAllLines(adminLicensePath);
-                var adminData = new Dictionary<string, string>();
-
-                foreach (var line in lines)
-                {
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
-                    
-                    var parts = line.Split(new[] { '=' }, 2);
-                    if (parts.Length == 2)
-                    {
-                        adminData[parts[0].Trim()] = parts[1].Trim();
-                    }
-                }
-
-                // Check required fields
-                if (!adminData.ContainsKey("AdminID") || 
-                    !adminData.ContainsKey("AdminKey") || 
-                    !adminData.ContainsKey("ValidUntil"))
-                {
-                    // Don't log details - security risk
-                    return false;
-                }
-
-                // Validate expiration
-                if (DateTime.TryParse(adminData["ValidUntil"], out var validDate) && validDate < DateTime.Now)
-                {
-                    // Don't log details - security risk
-                    Console.WriteLine("⚠️ Admin license has expired.");
-                    return false;
-                }
-
-                // Simple validation - in production, you'd validate AdminKey against AdminID
-                string expectedKey = GenerateAdminKey(adminData["AdminID"]);
-                if (adminData["AdminKey"] != expectedKey)
-                {
-                    // Don't log details - security risk
-                    Console.WriteLine("⚠️ Invalid admin license key.");
-                    return false;
-                }
-
-                // Only log success, not failure details
-                Logger.Info("Admin license validated successfully");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                // Log exception but don't reveal validation logic
-                Logger.Error("Admin license validation failed", ex);
-                return false;
-            }
-        }
-
-        static string GenerateAdminKey(string adminId)
-        {
-            // Simple hash for admin key - in production use a more secure method
-            using (SHA256 sha = SHA256.Create())
-            {
-                string data = adminId + "|DIGISIGN_ADMIN_SECRET";
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
-                return BitConverter.ToString(hash).Replace("-", "");
-            }
-        }
-
-        // Helper class to pass form results
-        class LicenseGenerationResult
-        {
-            public string LicenseKeyPath { get; set; }
-            public string CustomerId { get; set; }
-            public string LicenseNumber { get; set; }
-            public DateTime ExpirationDate { get; set; }
-            public bool WasCancelled { get; set; }
-        }
-
-
         static void RunAdminMode(string adminLicensePath)
         {
             // Admin license is valid, proceed with license generation
             Logger.Info("Admin license validated - entering license generation mode");
-            Console.WriteLine("✅ Admin license validated");
-            Console.WriteLine();
-            
-            Console.WriteLine("This mode is ONLY for generating user licenses.");
-            Console.WriteLine("No PDF signing will be performed.");
-            Console.WriteLine();
-            Console.WriteLine("═══════════════════════════════════════════════════════════");
-            Console.WriteLine();
-            
+
             // Use Windows Forms GUI for admin mode
             Logger.Debug("Showing License Generation Form");
-            
-            Console.WriteLine("Opening License Generation Form...");
-            Console.WriteLine("(Please fill in the form that appears)");
-            Console.WriteLine();
-            
-            LicenseGenerationResult result = ShowLicenseGenerationForm();
-            
+
+            LicenseGenerationResult result = LicenseManager.ShowLicenseGenerationForm();
+
             if (result == null || result.WasCancelled)
             {
-                Console.WriteLine();
-                Console.WriteLine("License generation cancelled by user.");
                 Logger.Info("Admin mode exited - User cancelled the license generation form");
-                Console.WriteLine();
-                Console.WriteLine("Press any key to exit...");
-                Console.ReadKey();
                 return;
             }
             
@@ -1383,201 +685,57 @@ namespace DigiSign
             Logger.Debug($"  Customer ID: {result.CustomerId}");
             Logger.Debug($"  License Number: {result.LicenseNumber}");
             Logger.Debug($"  Expiration Date: {result.ExpirationDate:yyyy-MM-dd}");
-            
-            // Generate license from the form data
-            Console.WriteLine();
-            Console.WriteLine($"✅ License key file: {Path.GetFileName(result.LicenseKeyPath)}");
-            Console.WriteLine($"✅ Customer ID: {result.CustomerId}");
-            Console.WriteLine($"✅ License Number: {result.LicenseNumber}");
-            Console.WriteLine($"✅ Expiration Date: {result.ExpirationDate:yyyy-MM-dd}");
-            Console.WriteLine();
-            
-            if (GenerateLicenseFromForm(result))
+
+            if (LicenseManager.GenerateLicenseFromForm(result))
             {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("✅ LICENSE GENERATED SUCCESSFULLY!");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.ResetColor();
-                Console.WriteLine();
-                Console.WriteLine("The license.txt file has been created in the same folder");
-                Console.WriteLine("as the license.key file. Please send this file to the user.");
                 Logger.Info($"License file generated successfully from: {result.LicenseKeyPath}");
+                MessageBox.Show(
+                    "LICENSE GENERATED SUCCESSFULLY!\n\nThe license.txt file has been created in the same folder as the license.key file.\n\nPlease send this file to the user.",
+                    "Success",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine();
-                Console.WriteLine("❌ Failed to generate license file.");
-                Console.ResetColor();
-                Console.WriteLine();
-                Console.WriteLine("Please check:");
-                Console.WriteLine("  1. The license.key file is valid");
-                Console.WriteLine("  2. You have write permissions to the output folder");
-                Console.WriteLine("  3. The application_log.txt for detailed error information");
                 Logger.Error("Failed to generate license file");
+                MessageBox.Show(
+                    "Failed to generate license file.\n\nPlease check:\n  1. The license.key file is valid\n  2. You have write permissions to the output folder\n  3. The application_log.txt for detailed error information",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
-            
-            Console.WriteLine();
+
             // Exit after admin operations - DO NOT process PDFs
             Logger.Info("Exiting admin mode (no PDF processing)");
             Logger.Info("Application ended");
-            Console.WriteLine("Press any key to exit...");
-            Console.ReadKey();
         }
 
-        static LicenseGenerationResult ShowLicenseGenerationForm()
-        {
-            try
-            {
-                Logger.Debug("Creating LicenseGenerationForm instance");
-                
-                using (var form = new LicenseGenerationForm())
-                {
-                    Logger.Debug("Showing form dialog");
-                    var dialogResult = form.ShowDialog();
-                    Logger.Debug($"Dialog result: {dialogResult}");
-                    
-                    if (form.WasCancelled || dialogResult != DialogResult.OK)
-                    {
-                        Logger.Info("User cancelled the license generation form");
-                        return new LicenseGenerationResult { WasCancelled = true };
-                    }
-                    
-                    Logger.Info("User completed the license generation form");
-                    return new LicenseGenerationResult
-                    {
-                        LicenseKeyPath = form.LicenseKeyPath,
-                        CustomerId = form.CustomerId,
-                        LicenseNumber = form.LicenseNumber,
-                        ExpirationDate = form.ExpirationDate,
-                        WasCancelled = false
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error showing license generation form", ex);
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine();
-                Console.WriteLine($"ERROR: Failed to show license generation form: {ex.Message}");
-                Console.ResetColor();
-                return new LicenseGenerationResult { WasCancelled = true };
-            }
-        }
-        
         static void RunSettingsMode()
         {
             // Settings mode - no license required
             Logger.Info("Entering settings mode - no license required");
-            
-            Console.WriteLine("Opening settings panel...");
-            Console.WriteLine("Configure your PDF signing settings without requiring admin privileges.");
-            Console.WriteLine();
-            
+
             try
             {
                 Logger.Debug("Creating LicenseGenerationForm for settings only");
-                
+
                 using (var form = new LicenseGenerationForm(settingsOnly: true))
                 {
                     Logger.Debug("Showing settings form");
                     form.ShowDialog();
                     Logger.Debug("Settings form closed");
                 }
-                
-                Console.WriteLine();
-                Console.WriteLine("Settings panel closed.");
+
                 Logger.Info("Settings mode completed");
             }
             catch (Exception ex)
             {
                 Logger.Error("Error showing settings panel", ex);
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine();
-                Console.WriteLine($"ERROR: Failed to show settings panel: {ex.Message}");
-                Console.ResetColor();
-                Console.WriteLine();
-                Console.WriteLine("Press any key to exit...");
-                Console.ReadKey();
-            }
-        }
-
-        static bool GenerateLicenseFromForm(LicenseGenerationResult formData)
-        {
-            try
-            {
-                Logger.Info($"Generating license from form data");
-                Logger.Info($"  License key file: {formData.LicenseKeyPath}");
-                
-                // Read license.key file
-                var keyLines = File.ReadAllLines(formData.LicenseKeyPath);
-                var keyData = new Dictionary<string, string>();
-
-                foreach (var line in keyLines)
-                {
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
-                    
-                    var parts = line.Split(new[] { '=' }, 2);
-                    if (parts.Length == 2)
-                    {
-                        keyData[parts[0].Trim()] = parts[1].Trim();
-                    }
-                }
-
-                if (!keyData.ContainsKey("DeviceID"))
-                {
-                    Logger.Error("Invalid license.key file - missing DeviceID");
-                    MessageBox.Show("Invalid license.key file - missing DeviceID.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return false;
-                }
-
-                string deviceId = keyData["DeviceID"];
-                
-                Logger.Debug($"Device ID from key: {deviceId}");
-                Logger.Debug($"Customer ID: {formData.CustomerId}");
-                Logger.Debug($"License Number: {formData.LicenseNumber}");
-                Logger.Debug($"Valid Until: {formData.ExpirationDate:yyyy-MM-dd}");
-
-                // Generate device hash - IMPORTANT: Include ValidUntil to prevent date tampering
-                string validUntilStr = formData.ExpirationDate.ToString("yyyy-MM-dd");
-                string deviceHash = GenerateDeviceHash(deviceId, formData.LicenseNumber, validUntilStr);
-                Logger.Debug($"Generated Device Hash: {deviceHash}");
-                Logger.Info("Hash includes expiration date - prevents date tampering in license file");
-
-                // Create license.txt in the same directory as license.key
-                string outputDir = Path.GetDirectoryName(formData.LicenseKeyPath);
-                string licensePath = Path.Combine(outputDir, "license.txt");
-
-                var licenseContent = new StringBuilder();
-                licenseContent.AppendLine($"CustomerID={formData.CustomerId}");
-                licenseContent.AppendLine($"ValidUntil={formData.ExpirationDate:yyyy-MM-dd}");
-                licenseContent.AppendLine($"DeviceID={deviceId}");
-                licenseContent.AppendLine($"LicenseNumber={formData.LicenseNumber}");
-                licenseContent.AppendLine($"DeviceHash={deviceHash}");
-
-                File.WriteAllText(licensePath, licenseContent.ToString());
-                Logger.Info($"License file generated successfully: {licensePath}");
-
-                Console.WriteLine();
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-                Console.WriteLine("License Details:");
-                Console.WriteLine($"  Customer ID: {formData.CustomerId}");
-                Console.WriteLine($"  License Number: {formData.LicenseNumber}");
-                Console.WriteLine($"  Valid Until: {formData.ExpirationDate:yyyy-MM-dd}");
-                Console.WriteLine($"  Device ID: {deviceId}");
-                Console.WriteLine($"  Output File: {licensePath}");
-                Console.WriteLine("═══════════════════════════════════════════════════════════");
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Error generating license from form data", ex);
-                Console.WriteLine($"Error generating license: {ex.Message}");
-                MessageBox.Show($"Error generating license: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
+                MessageBox.Show(
+                    $"Failed to show settings panel: {ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 
@@ -1614,10 +772,6 @@ namespace DigiSign
             catch (Exception ex)
             {
                 Logger.Error("Error showing file selection dialog", ex);
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine();
-                Console.WriteLine($"ERROR: Failed to show file selection dialog: {ex.Message}");
-                Console.ResetColor();
                 return null;
             }
         }
