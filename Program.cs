@@ -4,19 +4,10 @@ using System.Linq;
 using System.Windows.Forms;
 using System.IO;
 using System.Drawing;
-using iTextSharp.text;
-using iTextSharp.text.pdf;
-using iTextSharp.text.pdf.security;
-using Org.BouncyCastle.X509;
-using Org.BouncyCastle.Security;
 using System.Xml.Linq;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Net.Pkcs11Interop.Common;
-using Net.Pkcs11Interop.HighLevelAPI;
-using Spire.Pdf.Graphics;
-using System.Security.AccessControl;
 using System.Text;
 using System.Management;
 using System.Reflection;
@@ -124,40 +115,6 @@ namespace DigiSign
         public bool UseSelfSigned { get; set; } = false;
         public bool VerboseMode { get; set; } = false;
 
-    }
-
-    public class PdfSignatureValidator
-    {
-        public class SignatureValidationResult
-        {
-            public string SignatureName { get; set; }
-            public bool IsValid { get; set; }
-        }
-
-        public static List<SignatureValidationResult> ValidateSignatures(string pdfPath)
-        {
-            var results = new List<SignatureValidationResult>();
-
-            using (PdfReader reader = new PdfReader(pdfPath))
-            {
-                AcroFields af = reader.AcroFields;
-                var signatureNames = af.GetSignatureNames();
-
-                foreach (var name in signatureNames)
-                {
-                    PdfPKCS7 pkcs7 = af.VerifySignature(name);
-                    bool valid = pkcs7.Verify();
-
-                    results.Add(new SignatureValidationResult
-                    {
-                        SignatureName = name,
-                        IsValid = valid
-                    });
-                }
-            }
-
-            return results;
-        }
     }
 
 
@@ -721,9 +678,12 @@ namespace DigiSign
                         VerboseLog($"Searching for: {commonName}", VerboseLogType.Detail);
                         Application.DoEvents();
                     }
-                    
+
                     Logger.Info($"Loading certificate: {commonName}");
-                    var cert = LoadCertificateFromUSBToken(commonName, pin, xmlData);
+
+                    // Use DigitalSignatureService for all signing operations
+                    var signatureService = new DigitalSignatureService();
+                    var cert = signatureService.LoadCertificate(commonName, pin, xmlData);
 
                     if (cert != null)
                     {
@@ -731,7 +691,7 @@ namespace DigiSign
                         Logger.Debug($"Certificate Subject: {cert.Subject}");
                         Logger.Debug($"Certificate Thumbprint: {cert.Thumbprint}");
                         Logger.Debug($"Certificate Expiry: {cert.NotAfter:yyyy-MM-dd}");
-                        
+
                         if (isVerboseMode)
                         {
                             VerboseLog("Certificate loaded", VerboseLogType.Success);
@@ -742,7 +702,10 @@ namespace DigiSign
                             verboseForm.AppendText("\n", Color.Black);
                             Application.DoEvents();
                         }
-                        
+
+                        // Create signature configuration
+                        var signatureConfig = new SignatureConfiguration(xCoord, yCoord, width, height, signOnPage);
+
                         // Process each PDF file
                         int successCount = 0;
                         int failCount = 0;
@@ -767,7 +730,7 @@ namespace DigiSign
 
                             try
                             {
-                                SignPdfWithITextSharp(inputPdfPath, outputPdfPath, cert, xCoord, yCoord, width, height, signOnPage, pin, outputFolderPath);
+                                signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath, isVerboseMode, verboseForm);
                                 successCount++;
                                 successfulFiles.Add(outputFileName); // Track successful file
                                 Logger.Info($"Successfully signed: {inputFileName}");
@@ -1748,18 +1711,6 @@ namespace DigiSign
             }
         }
 
-        static bool CertificateMatchesCN(X509Certificate2 cert, string commonName)
-        {
-            // Extract CN part from the subject
-            var cnPart = cert.Subject
-                .Split(',')
-                .Select(p => p.Trim())
-                .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))?
-                .Substring(3);
-
-            return string.Equals(cnPart, commonName, StringComparison.OrdinalIgnoreCase);
-        }
-
         static X509Certificate2 GetCertificate(string commonName)
         {
             using (var store = new X509Store(StoreName.My, StoreLocation.CurrentUser))
@@ -1770,432 +1721,6 @@ namespace DigiSign
                     return certs[0];
             }
             return null;
-        }
-
-        static X509Certificate2 LoadCertificateFromUSBToken(string commonName, string pin, XmlData xmlData)
-        {
-            Logger.Debug($"Loading certificate with CN: {commonName}");
-            X509Store[] stores = new X509Store[]
-            {
-        new X509Store(StoreName.My, StoreLocation.CurrentUser),
-        new X509Store(StoreName.My, StoreLocation.LocalMachine)
-            };
-
-            foreach (var store in stores)
-            {
-                try
-                {
-                    Logger.Debug($"Searching certificates in {store.Location}\\{store.Name} store");
-                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-
-                    // Step 1: Try USB token certificate first
-                    var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
-                    Logger.Debug($"Found {certs.Count} certificate(s) matching name: {commonName}");
-                    
-                    foreach (var cert in certs.Cast<X509Certificate2>())
-                    {
-                        Logger.Debug($"Certificate found - Subject: {cert.Subject}, Issuer: {cert.Issuer}, HasPrivateKey: {cert.HasPrivateKey}");
-
-                        if (CertificateMatchesCN(cert, commonName))
-                        {
-                    if (cert.HasPrivateKey)
-                        {
-                            try
-                            {
-                                // Try to get the legacy private key for PIN setup
-                                if (cert.PrivateKey is RSACryptoServiceProvider rsaCsp && rsaCsp.CspKeyContainerInfo.HardwareDevice)
-                                {
-                                    if (!string.IsNullOrEmpty(pin))
-                                    {
-                                        cert.SetPinForPrivateKey(pin);
-                                        Logger.Info("PIN set for hardware token certificate from IP.xml");
-                                    }
-                                    else
-                                    {
-                                        Logger.Warning("Hardware token detected but no PIN provided in IP.xml - user may be prompted");
-                                    }
-                                }
-                                else
-                                {
-                                    Logger.Debug("Certificate has private key, but not hardware token. No PIN needed");
-                                }
-                            }
-                            catch (CryptographicException ex)
-                            {
-                                Logger.Warning($"Unable to access private key: {ex.Message}");
-                            }
-                        }
-
-                            Logger.Info($"Certificate matched CN='{commonName}': {cert.Subject}");
-                            return cert;
-                        }
-
-
-                        // Step 2: Check self-signed certificate if allowed
-                        else if (xmlData.UseSelfSigned)
-                        {
-                            var selfSignedCert = store.Certificates
-                                .Cast<X509Certificate2>()
-                                .FirstOrDefault(c =>
-                                    c.Subject == c.Issuer &&
-                                    CertificateMatchesCN(c, commonName));
-
-                            if (selfSignedCert != null)
-                            {
-                                Logger.Info($"Selected self-signed certificate: {selfSignedCert.Subject}");
-                                return selfSignedCert;
-                            }
-                            else
-                            {
-                                Logger.Debug("No matching self-signed certificate found in this store");
-                            }
-                        }
-                        else
-                        {
-                            Logger.Debug("Self-signed certificate selection disabled");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"Failed to open {store.Location}\\{store.Name} store", ex);
-                }
-                finally
-                {
-                    store.Close();
-                }
-            }
-
-            // Not found
-            Logger.Error($"No certificate found for CN='{commonName}' in any store");
-            return null;
-        }
-        static void SignPdfWithITextSharp(string inputPath, string outputPath, X509Certificate2 cert, float x, float y, float width, float height, string signOnPage, string certPassword, string outputFolderPath)
-        {
-            try
-            {
-                Logger.Info("Starting PDF processing - Full cryptographic signing mode");
-                
-                if (isVerboseMode)
-                {
-                    VerboseLog("Reading PDF file...", VerboseLogType.Info);
-                }
-
-                // Extract CN from the certificate subject
-                string cn = cert.Subject
-                    .Split(',')
-                    .Select(p => p.Trim())
-                    .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
-                    ?.Substring(3) ?? "Unknown";
-
-                string signatureText = $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-
-                Logger.Debug($"Signature text: {signatureText.Replace("\n", " | ")}");
-
-                // Setup PDF reader
-                PdfReader reader = new PdfReader(inputPath);
-                int pageCount = reader.NumberOfPages;
-                
-                Logger.Debug($"PDF has {pageCount} pages");
-                
-                if (isVerboseMode)
-                {
-                    VerboseLog($"Pages: {pageCount}", VerboseLogType.Info);
-                    VerboseLog("Signature mode: FULL (cryptographic)", VerboseLogType.Info);
-                }
-
-                // Determine which pages to process
-                var pagesToProcess = new List<int>();
-                switch (signOnPage?.ToUpper())
-                {
-                    case "F":
-                        pagesToProcess.Add(1); // First page
-                        if (isVerboseMode) VerboseLog("Signing: First page only", VerboseLogType.Info);
-                        break;
-                    case "E":
-                        pagesToProcess.AddRange(Enumerable.Range(1, pageCount)); // Each page
-                        if (isVerboseMode) VerboseLog($"Signing: All {pageCount} pages", VerboseLogType.Info);
-                        break;
-                    case "L":
-                    default:
-                        pagesToProcess.Add(pageCount); // Last page
-                        if (isVerboseMode) VerboseLog("Signing: Last page only", VerboseLogType.Info);
-                        break;
-                }
-
-                // Apply actual digital signature
-                Logger.Info("Full mode: Applying cryptographic digital signature");
-                
-                if (isVerboseMode)
-                {
-                    VerboseLog("Creating signature...", VerboseLogType.Info);
-                }
-                
-                using (FileStream os = new FileStream(outputPath, FileMode.Create))
-                {
-                        PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
-                        PdfSignatureAppearance appearance = stamper.SignatureAppearance;
-                        appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
-                        appearance.Reason = "Digitally signed";
-                        appearance.Acro6Layers = false;
-
-                        // Sign each specified page
-                        foreach (int page in pagesToProcess)
-                        {
-                            iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
-                            float pageWidth = pageSize.Width;
-                            float pageHeight = pageSize.Height;
-
-                            // Validate coordinates
-                            float adjustedX = x;
-                            float adjustedY = y;
-                            float adjustedWidth = width;
-                            float adjustedHeight = height;
-
-                            if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
-                            {
-                                Logger.Warning($"Signature rectangle outside page {page} boundaries. Adjusting coordinates");
-                                Logger.Debug($"Original: X={x}, Y={y}, W={width}, H={height}, PageSize: {pageWidth}x{pageHeight}");
-                                adjustedX = Math.Max(50, x);
-                                adjustedY = Math.Max(50, y);
-                                adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
-                                adjustedHeight = Math.Min(height, pageHeight - adjustedY - 50);
-                                Logger.Debug($"Adjusted: X={adjustedX}, Y={adjustedY}, W={adjustedWidth}, H={adjustedHeight}");
-                            }
-
-                            // Define visible signature area for the current page
-                            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(adjustedX, adjustedY, adjustedX + adjustedWidth, adjustedY + adjustedHeight), page, $"sig_{page}");
-
-                            // Disable default Layer2 text to avoid double rendering
-                            appearance.Layer2Text = string.Empty;
-
-                            // Draw signature appearance
-                            PdfContentByte over = stamper.GetOverContent(page);
-                            DrawSignatureText(over, cn, signatureText, adjustedX, adjustedY, adjustedWidth, adjustedHeight);
-                        }
-
-                        if (isVerboseMode)
-                        {
-                            VerboseLog("Applying cryptographic signature...", VerboseLogType.Info);
-                        }
-
-                        // Create a custom implementation of IExternalSignature
-                        IExternalSignature externalSignature = new SafeCertificateSignature(cert, "SHA-256");
-
-                        // Convert the certificate to a BouncyCastle certificate
-                        Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
-
-                        // Sign the document
-                        var ocspClient = new OcspClientBouncyCastle();
-                        ITSAClient tsaClient = null;
-
-                        try
-                        {
-                            Logger.Debug("Attempting to get timestamp from DigiCert");
-                            if (isVerboseMode)
-                            {
-                                VerboseLog("Requesting timestamp...", VerboseLogType.Info);
-                            }
-                            tsaClient = new TSAClientBouncyCastle("http://timestamp.digicert.com");
-                            Logger.Info("Timestamp service connected successfully");
-                            if (isVerboseMode)
-                            {
-                                VerboseLog("Timestamp acquired", VerboseLogType.Success);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Warning($"TSA not available, proceeding without timestamp: {ex.Message}");
-                            if (isVerboseMode)
-                            {
-                                VerboseLog("Timestamp unavailable (continuing without)", VerboseLogType.Warning);
-                            }
-                        }
-
-                        MakeSignature.SignDetached(
-                            appearance,
-                            externalSignature,
-                            new[] { bcCert },
-                            null,
-                            ocspClient,
-                            tsaClient,
-                            0,
-                            CryptoStandard.CMS
-                        );
-
-                        Logger.Info($"PDF digitally signed successfully: {Path.GetFileName(outputPath)}");
-                        // Note: PLF log will be written after verbose dialog closes
-                        
-                        if (isVerboseMode)
-                        {
-                            VerboseLog($"Saving signed PDF: {Path.GetFileName(outputPath)}", VerboseLogType.Info);
-                        }
-                    }
-
-                reader.Close();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Failed to process PDF: {Path.GetFileName(inputPath)}", ex);
-                Logger.LogToPlf($"ERROR: Failed to process '{Path.GetFileName(inputPath)}' - {ex.Message}", isError: true);
-                throw; // Re-throw to be caught in Main method
-            }
-        }
-
-        static void DrawSignatureText(PdfContentByte over, string cn, string signatureText, float adjustedX, float adjustedY, float adjustedWidth, float adjustedHeight)
-        {
-            over.SaveState();
-
-            // Draw text with wrapping
-            BaseFont baseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
-            BaseFont baseFontText = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
-
-            float fontSizeCN = 10;
-            float fontSizeText = 9;
-            float padding = 3;
-            float maxTextWidth = adjustedWidth - 2 * padding;
-            float leadingCN = fontSizeCN + 3;
-            float leadingText = fontSizeText + 1;
-            float maxY = adjustedY + adjustedHeight - padding;
-            float minY = adjustedY + padding;
-            float currentY = maxY;
-
-            over.BeginText();
-
-            // Draw CN with wrapping
-            over.SetFontAndSize(baseFontCN, fontSizeCN);
-            over.SetColorFill(BaseColor.BLACK);
-            string cnLine = cn.Trim();
-            if (!string.IsNullOrEmpty(cnLine))
-            {
-                List<string> wrappedCNLines = new List<string>();
-                string[] words = cnLine.Split(' ');
-                string currentLine = "";
-                foreach (string word in words)
-                {
-                    string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
-                    float lineWidth = baseFontCN.GetWidthPoint(testLine, fontSizeCN);
-                    if (lineWidth <= maxTextWidth)
-                    {
-                        currentLine = testLine;
-                    }
-                    else
-                    {
-                        wrappedCNLines.Add(currentLine);
-                        currentLine = word;
-                    }
-                }
-                if (!string.IsNullOrEmpty(currentLine))
-                    wrappedCNLines.Add(currentLine);
-
-                foreach (string wrappedLine in wrappedCNLines)
-                {
-                    if (currentY - leadingCN < minY) break;
-                    over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                    currentY -= leadingCN;
-                }
-            }
-
-            // Draw signature text (skip first CN line since we already drew it)
-            over.SetFontAndSize(baseFontText, fontSizeText);
-            var signatureLines = signatureText.Split('\n').Skip(1).ToList();
-            
-            Logger.Debug($"Drawing {signatureLines.Count} signature text lines");
-
-            foreach (string rawLine in signatureLines)
-            {
-                string line = rawLine.Trim();
-                if (string.IsNullOrEmpty(line)) continue;
-
-                Logger.Debug($"Processing signature line: {line}");
-
-                List<string> wrappedLines = new List<string>();
-                string[] words = line.Split(' ');
-                string currentLine = "";
-
-                foreach (string word in words)
-                {
-                    string testLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
-                    float lineWidth = baseFontText.GetWidthPoint(testLine, fontSizeText);
-
-                    if (lineWidth <= maxTextWidth)
-                    {
-                        currentLine = testLine;
-                    }
-                    else
-                    {
-                        wrappedLines.Add(currentLine);
-                        currentLine = word;
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(currentLine))
-                {
-                    wrappedLines.Add(currentLine);
-                }
-
-                foreach (string wrappedLine in wrappedLines)
-                {
-                    if (currentY - leadingText < minY) break;
-
-                    over.SetColorFill(BaseColor.BLACK);
-                    over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, adjustedX + padding, currentY, 0);
-                    currentY -= leadingText;
-                }
-            }
-
-            over.EndText();
-            over.RestoreState();
-        }
-
-
-
-        public class SafeCertificateSignature : IExternalSignature
-        {
-            private readonly X509Certificate2 _certificate;
-            private readonly string _hashAlgorithm;
-
-            public SafeCertificateSignature(X509Certificate2 certificate, string hashAlgorithm)
-            {
-                _certificate = certificate;
-                _hashAlgorithm = hashAlgorithm;
-            }
-
-            public string GetHashAlgorithm() => _hashAlgorithm;
-
-            public string GetEncryptionAlgorithm() => "RSA";
-
-            public byte[] Sign(byte[] message)
-            {
-                // Use legacy PrivateKey property to work with PIN caching
-                if (_certificate.PrivateKey is RSACryptoServiceProvider rsaCsp)
-                {
-                    Logger.Debug("Using RSACryptoServiceProvider for signing (supports PIN caching)");
-                    
-                    // Compute hash of the message
-                    using (var sha256 = SHA256.Create())
-                    {
-                        byte[] hash = sha256.ComputeHash(message);
-                        // Sign the hash using the private key (PIN already cached via SetPinForPrivateKey)
-                        return rsaCsp.SignHash(hash, CryptoConfig.MapNameToOID("SHA256"));
-                    }
-                }
-                else
-                {
-                    // Fallback to modern API if legacy provider not available
-                    Logger.Debug("Using GetRSAPrivateKey for signing");
-                    using (var rsa = _certificate.GetRSAPrivateKey())
-                    {
-                        if (rsa == null)
-                            throw new InvalidOperationException("RSA private key not found.");
-
-                        HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
-
-                        // This may trigger PIN prompt if PIN not cached
-                        return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
-                    }
-                }
-            }
         }
     }
 }
