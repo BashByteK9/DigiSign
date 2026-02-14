@@ -6,12 +6,12 @@ using iTextSharp.text.pdf.security;
 namespace DigiSign
 {
     /// <summary>
-    /// Helper classes for digital signature operations
+    /// Helper class for digital signature operations
     /// </summary>
     public static class SignatureHelper
     {
         /// <summary>
-        /// Safe implementation of IExternalSignature for certificate-based signing with PIN caching support
+        /// Safe implementation of IExternalSignature for certificate-based signing
         /// </summary>
         public class SafeCertificateSignature : IExternalSignature
         {
@@ -30,33 +30,15 @@ namespace DigiSign
 
             public byte[] Sign(byte[] message)
             {
-                // Use legacy PrivateKey property to work with PIN caching
-                if (_certificate.PrivateKey is RSACryptoServiceProvider rsaCsp)
+                using (var rsa = _certificate.GetRSAPrivateKey())
                 {
-                    Logger.Debug("Using RSACryptoServiceProvider for signing (supports PIN caching)");
+                    if (rsa == null)
+                        throw new InvalidOperationException("RSA private key not found.");
 
-                    // Compute hash of the message
-                    using (var sha256 = SHA256.Create())
-                    {
-                        byte[] hash = sha256.ComputeHash(message);
-                        // Sign the hash using the private key (PIN already cached via SetPinForPrivateKey)
-                        return rsaCsp.SignHash(hash, CryptoConfig.MapNameToOID("SHA256"));
-                    }
-                }
-                else
-                {
-                    // Fallback to modern API if legacy provider not available
-                    Logger.Debug("Using GetRSAPrivateKey for signing");
-                    using (var rsa = _certificate.GetRSAPrivateKey())
-                    {
-                        if (rsa == null)
-                            throw new InvalidOperationException("RSA private key not found.");
+                    HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
 
-                        HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
-
-                        // This may trigger PIN prompt if PIN not cached
-                        return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
-                    }
+                    // Use Windows to handle the PIN prompt and signing
+                    return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
                 }
             }
         }

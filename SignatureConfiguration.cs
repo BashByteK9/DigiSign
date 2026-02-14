@@ -26,8 +26,6 @@ namespace DigiSign
         /// <summary>
         /// Determines which pages should be signed based on SignOnPage setting
         /// </summary>
-        /// <param name="totalPages">Total number of pages in the PDF</param>
-        /// <returns>List of page numbers to sign (1-based index)</returns>
         public List<int> GetPagesToSign(int totalPages)
         {
             var pagesToSign = new List<int>();

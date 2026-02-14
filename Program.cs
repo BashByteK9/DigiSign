@@ -28,6 +28,8 @@ namespace DigiSign
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
         public bool UseSelfSigned { get; set; } = false;
         public bool VerboseMode { get; set; } = false;
+        public string SelfSignedPath { get; set; }
+        public string SelfSignedPassword { get; set; }
 
     }
 
@@ -440,7 +442,8 @@ namespace DigiSign
 
                             try
                             {
-                                signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath, isVerboseMode, verboseForm);
+                                //signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath, isVerboseMode, verboseForm);
+                                signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath);
                                 successCount++;
                                 successfulFiles.Add(outputFileName); // Track successful file
                                 Logger.Info($"Successfully signed: {inputFileName}");
