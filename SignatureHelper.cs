@@ -30,14 +30,21 @@ namespace DigiSign
 
             public byte[] Sign(byte[] message)
             {
+                // Use the legacy PrivateKey property to ensure PIN settings are respected
+                // This is necessary for USB tokens where PIN has been set via SetPinForPrivateKey
+                if (_certificate.PrivateKey is RSACryptoServiceProvider rsaCsp)
+                {
+                    HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
+                    return rsaCsp.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
+                }
+
+                // Fallback to GetRSAPrivateKey for certificates not using CSP
                 using (var rsa = _certificate.GetRSAPrivateKey())
                 {
                     if (rsa == null)
                         throw new InvalidOperationException("RSA private key not found.");
 
                     HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
-
-                    // Use Windows to handle the PIN prompt and signing
                     return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
                 }
             }
