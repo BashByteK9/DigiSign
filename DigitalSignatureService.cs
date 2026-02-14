@@ -73,7 +73,7 @@ namespace DigiSign
                     ?.Substring(3) ?? "Unknown";
 
                 string signatureText =
-                    $"{cn}\nDigitally signed by {cn}\nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+                    $"{cn}\n \nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
@@ -87,7 +87,7 @@ namespace DigiSign
                     PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
                     PdfSignatureAppearance appearance = stamper.SignatureAppearance;
                     appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
-                    appearance.Reason = "Digitally signed";
+                    //appearance.Reason = "Digitally signed";
                     appearance.Acro6Layers = false;
 
                     // Sign each specified page
