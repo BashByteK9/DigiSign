@@ -27,19 +27,44 @@ namespace DigiSign
                 try
                 {
                     store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                    Logger.Debug($"Searching for certificate '{commonName}' in {location} store");
 
                     // First try: exact subject name match
                     var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
 
                     if (certs.Count > 0)
                     {
+                        Logger.Info($"Found certificate '{commonName}' in {location} store");
                         LogToFile($"Info;Found certificate '{commonName}' in {location} store", "");
                         var cert = certs[0];
 
                         // Only set PIN if certificate has a private key
                         if (cert.HasPrivateKey)
                         {
-                            cert.SetPinForPrivateKey(pin);
+                            Logger.Debug("Certificate has private key, setting PIN");
+                            try
+                            {
+                                if (!string.IsNullOrEmpty(pin))
+                                {
+                                    cert.SetPinForPrivateKey(pin);
+                                    Logger.Debug("PIN set successfully");
+                                }
+                                else
+                                {
+                                    Logger.Info("No PIN provided - Windows will prompt for PIN during signing");
+                                }
+                            }
+                            catch (Exception pinEx)
+                            {
+                                Logger.Warning($"Failed to set PIN: {pinEx.Message}");
+                                Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
+                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
+                                // Continue and return the certificate - Windows will prompt for PIN
+                            }
+                        }
+                        else
+                        {
+                            Logger.Warning("Certificate found but has no private key");
                         }
                         return cert;
                     }
@@ -49,12 +74,36 @@ namespace DigiSign
 
                     if (certsWithCN.Count > 0)
                     {
+                        Logger.Info($"Found certificate with CN '{commonName}' in {location} store");
                         LogToFile($"Info;Found certificate with CN '{commonName}' in {location} store", "");
                         var cert = certsWithCN[0];
 
                         if (cert.HasPrivateKey)
                         {
-                            cert.SetPinForPrivateKey(pin);
+                            Logger.Debug("Certificate has private key, setting PIN");
+                            try
+                            {
+                                if (!string.IsNullOrEmpty(pin))
+                                {
+                                    cert.SetPinForPrivateKey(pin);
+                                    Logger.Debug("PIN set successfully");
+                                }
+                                else
+                                {
+                                    Logger.Info("No PIN provided - Windows will prompt for PIN during signing");
+                                }
+                            }
+                            catch (Exception pinEx)
+                            {
+                                Logger.Warning($"Failed to set PIN: {pinEx.Message}");
+                                Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
+                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
+                                // Continue and return the certificate - Windows will prompt for PIN
+                            }
+                        }
+                        else
+                        {
+                            Logger.Warning("Certificate found but has no private key");
                         }
                         return cert;
                     }
@@ -62,15 +111,24 @@ namespace DigiSign
                     // Log available certificates for debugging
                     if (store.Certificates.Count > 0)
                     {
-                        LogToFile($"Debug;Available certificates in {location} store:", "");
+                        Logger.Debug($"Available certificates in {location} store: {store.Certificates.Count}");
+                        LogToFile($"Debug;Available certificates in {location} store: {store.Certificates.Count}", "");
                         foreach (X509Certificate2 availableCert in store.Certificates)
                         {
+                            Logger.Debug($"  - Subject: {availableCert.Subject}");
+                            Logger.Debug($"    HasPrivateKey: {availableCert.HasPrivateKey}, Thumbprint: {availableCert.Thumbprint}");
                             LogToFile($"Debug;  - Subject: {availableCert.Subject}, HasPrivateKey: {availableCert.HasPrivateKey}", "");
                         }
+                    }
+                    else
+                    {
+                        Logger.Debug($"No certificates found in {location} store");
+                        LogToFile($"Debug;No certificates found in {location} store", "");
                     }
                 }
                 catch (Exception ex)
                 {
+                    Logger.Warning($"Error searching {location} store: {ex.Message}");
                     LogToFile($"Warning;Error searching {location} store: {ex.Message}", "");
                 }
                 finally
@@ -82,6 +140,7 @@ namespace DigiSign
             // No token found → try self-signed fallback
             if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
             {
+                Logger.Info($"Using self-signed certificate from {xmlData.SelfSignedPath}");
                 LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
                 return new X509Certificate2(
                     xmlData.SelfSignedPath,
@@ -91,6 +150,7 @@ namespace DigiSign
             }
 
             // Nothing found
+            Logger.Error($"No USB token certificate or self-signed fallback found for '{commonName}'");
             LogToFile($"Error;No USB token certificate or self-signed fallback found for '{commonName}'", "");
             return null;
         }
