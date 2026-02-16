@@ -17,44 +17,82 @@ namespace DigiSign
         /// </summary>
         public X509Certificate2 LoadCertificate(string commonName, string pin, XmlData xmlData)
         {
-            X509Store store = new X509Store(StoreLocation.CurrentUser);
+            // Try searching in both CurrentUser and LocalMachine stores
+            var storeLocations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
 
-            try
+            foreach (var location in storeLocations)
             {
-                store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-                var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
+                X509Store store = new X509Store(StoreName.My, location);
 
-                if (certs.Count > 0)
+                try
                 {
-                    var cert = certs[0];
-                    cert.SetPinForPrivateKey(pin);
-                    return cert;
-                }
+                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
 
-                // No token found → try self-signed fallback
-                if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
+                    // First try: exact subject name match
+                    var certs = store.Certificates.Find(X509FindType.FindBySubjectName, commonName, false);
+
+                    if (certs.Count > 0)
+                    {
+                        LogToFile($"Info;Found certificate '{commonName}' in {location} store", "");
+                        var cert = certs[0];
+
+                        // Only set PIN if certificate has a private key
+                        if (cert.HasPrivateKey)
+                        {
+                            cert.SetPinForPrivateKey(pin);
+                        }
+                        return cert;
+                    }
+
+                    // Second try: search by subject distinguished name (CN=...)
+                    var certsWithCN = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, $"CN={commonName}", false);
+
+                    if (certsWithCN.Count > 0)
+                    {
+                        LogToFile($"Info;Found certificate with CN '{commonName}' in {location} store", "");
+                        var cert = certsWithCN[0];
+
+                        if (cert.HasPrivateKey)
+                        {
+                            cert.SetPinForPrivateKey(pin);
+                        }
+                        return cert;
+                    }
+
+                    // Log available certificates for debugging
+                    if (store.Certificates.Count > 0)
+                    {
+                        LogToFile($"Debug;Available certificates in {location} store:", "");
+                        foreach (X509Certificate2 availableCert in store.Certificates)
+                        {
+                            LogToFile($"Debug;  - Subject: {availableCert.Subject}, HasPrivateKey: {availableCert.HasPrivateKey}", "");
+                        }
+                    }
+                }
+                catch (Exception ex)
                 {
-                    LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
-                    return new X509Certificate2(
-                        xmlData.SelfSignedPath,
-                        xmlData.SelfSignedPassword,
-                        X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet
-                    );
+                    LogToFile($"Warning;Error searching {location} store: {ex.Message}", "");
                 }
+                finally
+                {
+                    store.Close();
+                }
+            }
 
-                // Nothing found
-                LogToFile($"Error;No USB token certificate or self-signed fallback found for {commonName}", "");
-                return null;
-            }
-            catch (Exception ex)
+            // No token found → try self-signed fallback
+            if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
             {
-                LogToFile($"Error; loading certificate::{commonName}::{ex.Message}", "");
-                return null;
+                LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
+                return new X509Certificate2(
+                    xmlData.SelfSignedPath,
+                    xmlData.SelfSignedPassword,
+                    X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet
+                );
             }
-            finally
-            {
-                store.Close();
-            }
+
+            // Nothing found
+            LogToFile($"Error;No USB token certificate or self-signed fallback found for '{commonName}'", "");
+            return null;
         }
 
         /// <summary>
