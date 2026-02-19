@@ -1,52 +1,52 @@
 ═══════════════════════════════════════════════════════════
-DigiSign Application Log - Session Started: 2026-01-30 09:37:13
+DigiSign Application Log - Session Started: 2026-02-19 15:06:08
 Application Path: D:\Development\DigiSign\
 Machine: VINOD-PC | User: vinod
 OS: Microsoft Windows NT 6.2.9200.0 | .NET: 4.0.30319.42000
 ═══════════════════════════════════════════════════════════
 
-2026-01-30 09:37:13 | INFO     | Logger initialized successfully
-2026-01-30 09:37:13 | INFO     | Application started
-2026-01-30 09:37:13 | DEBUG    | Command line arguments: /admin
-2026-01-30 09:37:13 | DEBUG    | License file path: D:\Development\DigiSign\license.txt
-2026-01-30 09:37:13 | DEBUG    | XML configuration file path: D:\Development\DigiSign\IP.xml
-2026-01-30 09:37:13 | DEBUG    | Reading XML configuration from: D:\Development\DigiSign\IP.xml
-2026-01-30 09:37:13 | DEBUG    | Input files found in XML: 1
-2026-01-30 09:37:13 | INFO     | XML configuration loaded successfully
+2026-02-19 15:06:08 | INFO     | Logger initialized successfully
+2026-02-19 15:06:08 | INFO     | Application started
+2026-02-19 15:06:08 | DEBUG    | Command line arguments: /admin
+2026-02-19 15:06:08 | DEBUG    | License file path: D:\Development\DigiSign\license.txt
+2026-02-19 15:06:08 | DEBUG    | XML configuration file path: D:\Development\DigiSign\IP.xml
+2026-02-19 15:06:08 | DEBUG    | Reading XML configuration from: D:\Development\DigiSign\IP.xml
+2026-02-19 15:06:08 | DEBUG    | Input files found in XML: 1
+2026-02-19 15:06:08 | INFO     | XML configuration loaded successfully
 --------------------------------------------------------------------------------
-2026-01-30 09:37:13 | INFO     | Starting license validation
-2026-01-30 09:37:13 | INFO     | License file found at: D:\Development\DigiSign\license.txt
-2026-01-30 09:37:13 | DEBUG    | Starting license validation
-2026-01-30 09:37:13 | DEBUG    | License Number: LIC-2025-0001
-2026-01-30 09:37:13 | DEBUG    | Valid Until: 2026-06-16
-2026-01-30 09:37:13 | DEBUG    | Stored Device ID: ABC123XYZ
-2026-01-30 09:37:14 | DEBUG    | Current Device ID: BFEBFBFF000906A4_AA000000000000001631
-2026-01-30 09:37:14 | WARNING  | Device mismatch - license is for a different device
-2026-01-30 09:37:14 | WARNING  | License validation failed - Demo Mode enabled
-2026-01-30 09:37:14 | INFO     | License key file already exists at: D:\Development\DigiSign\license.key
-2026-01-30 09:37:14 | INFO     | Application mode: DEMO
+2026-02-19 15:06:08 | INFO     | Starting license validation
+2026-02-19 15:06:08 | INFO     | License file found at: D:\Development\DigiSign\license.txt
+2026-02-19 15:06:08 | DEBUG    | Starting license validation
+2026-02-19 15:06:08 | DEBUG    | License Number: 123456789
+2026-02-19 15:06:08 | DEBUG    | Valid Until: 2027-01-30
+2026-02-19 15:06:08 | DEBUG    | Stored Device ID: BFEBFBFF000906A4_AA000000000000001631
+2026-02-19 15:06:09 | DEBUG    | Current Device ID: BFEBFBFF000906A4_[
+2026-02-19 15:06:09 | WARNING  | Device mismatch - license is for a different device
+2026-02-19 15:06:09 | WARNING  | License validation failed - Demo Mode enabled
+2026-02-19 15:06:09 | INFO     | License key file already exists at: D:\Development\DigiSign\license.key
+2026-02-19 15:06:09 | INFO     | Application mode: DEMO
 --------------------------------------------------------------------------------
-2026-01-30 09:37:14 | INFO     | Admin mode requested
-2026-01-30 09:37:14 | INFO     | Admin license validated successfully
-2026-01-30 09:37:14 | INFO     | Admin license validated - entering license generation mode
-2026-01-30 09:37:14 | DEBUG    | Showing License Generation Form
-2026-01-30 09:37:14 | DEBUG    | Creating LicenseGenerationForm instance
-2026-01-30 09:37:14 | DEBUG    | Showing form dialog
-2026-01-30 09:37:50 | DEBUG    | Dialog result: OK
-2026-01-30 09:37:50 | INFO     | User completed the license generation form
-2026-01-30 09:37:50 | DEBUG    | User input received from form
-2026-01-30 09:37:50 | DEBUG    |   License Key Path: D:\Development\DigiSign\license.key
-2026-01-30 09:37:50 | DEBUG    |   Customer ID: TRIALCUSTOMER
-2026-01-30 09:37:50 | DEBUG    |   License Number: 123456789
-2026-01-30 09:37:50 | DEBUG    |   Expiration Date: 2027-01-30
-2026-01-30 09:37:50 | INFO     | Generating license from form data
-2026-01-30 09:37:50 | INFO     |   License key file: D:\Development\DigiSign\license.key
-2026-01-30 09:37:50 | DEBUG    | Device ID from key: BFEBFBFF000906A4_AA000000000000001631
-2026-01-30 09:37:50 | DEBUG    | Customer ID: TRIALCUSTOMER
-2026-01-30 09:37:50 | DEBUG    | License Number: 123456789
-2026-01-30 09:37:50 | DEBUG    | Valid Until: 2027-01-30
-2026-01-30 09:37:50 | DEBUG    | Generated Device Hash: E95AA418E0B75254D8AABF2F7203B0D7D075F6C8506ED43BBBDD43011320E3D0
-2026-01-30 09:37:50 | INFO     | License file generated successfully: D:\Development\DigiSign\license.txt
-2026-01-30 09:37:50 | INFO     | License file generated successfully from: D:\Development\DigiSign\license.key
-2026-01-30 09:37:50 | INFO     | Exiting admin mode (no PDF processing)
-2026-01-30 09:37:50 | INFO     | Application ended
+2026-02-19 15:06:09 | INFO     | Admin mode requested
+2026-02-19 15:06:09 | INFO     | Admin license validated successfully
+2026-02-19 15:06:09 | INFO     | Admin license validated - entering license generation mode
+2026-02-19 15:06:09 | DEBUG    | Showing License Generation Form
+2026-02-19 15:06:09 | DEBUG    | Creating LicenseGenerationForm instance
+2026-02-19 15:06:09 | DEBUG    | Showing form dialog
+2026-02-19 15:06:34 | DEBUG    | Dialog result: OK
+2026-02-19 15:06:34 | INFO     | User completed the license generation form
+2026-02-19 15:06:34 | DEBUG    | User input received from form
+2026-02-19 15:06:34 | DEBUG    |   License Key Path: F:\PearlESign\license.key
+2026-02-19 15:06:34 | DEBUG    |   Customer ID: VINOD-PC
+2026-02-19 15:06:34 | DEBUG    |   License Number: VINOD-PC
+2026-02-19 15:06:34 | DEBUG    |   Expiration Date: 2027-02-19
+2026-02-19 15:06:34 | INFO     | Generating license from form data
+2026-02-19 15:06:34 | INFO     |   License key file: F:\PearlESign\license.key
+2026-02-19 15:06:34 | DEBUG    | Device ID from key: BFEBFBFF000906A4_AA000000000000001631
+2026-02-19 15:06:34 | DEBUG    | Customer ID: VINOD-PC
+2026-02-19 15:06:34 | DEBUG    | License Number: VINOD-PC
+2026-02-19 15:06:34 | DEBUG    | Valid Until: 2027-02-19
+2026-02-19 15:06:34 | DEBUG    | Generated Device Hash: B3CC1871574FA5EC902C617895F3F25A968BF01C0FD58CA21E1DD3041FE326F8
+2026-02-19 15:06:34 | INFO     | License file generated successfully: F:\PearlESign\license.txt
+2026-02-19 15:06:34 | INFO     | License file generated successfully from: F:\PearlESign\license.key
+2026-02-19 15:06:34 | INFO     | Exiting admin mode (no PDF processing)
+2026-02-19 15:06:34 | INFO     | Application ended

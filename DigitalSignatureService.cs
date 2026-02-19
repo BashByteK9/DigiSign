@@ -1,12 +1,13 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
 using iTextSharp.text.pdf.security;
 using Org.BouncyCastle.Security;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Cryptography.X509Certificates;
 
 namespace DigiSign
 {
@@ -35,7 +36,6 @@ namespace DigiSign
                     if (certs.Count > 0)
                     {
                         Logger.Info($"Found certificate '{commonName}' in {location} store");
-                        LogToFile($"Info;Found certificate '{commonName}' in {location} store", "");
                         var cert = certs[0];
 
                         // Only set PIN if certificate has a private key
@@ -58,7 +58,6 @@ namespace DigiSign
                             {
                                 Logger.Warning($"Failed to set PIN: {pinEx.Message}");
                                 Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
-                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
                                 // Continue and return the certificate - Windows will prompt for PIN
                             }
                         }
@@ -75,7 +74,6 @@ namespace DigiSign
                     if (certsWithCN.Count > 0)
                     {
                         Logger.Info($"Found certificate with CN '{commonName}' in {location} store");
-                        LogToFile($"Info;Found certificate with CN '{commonName}' in {location} store", "");
                         var cert = certsWithCN[0];
 
                         if (cert.HasPrivateKey)
@@ -97,7 +95,6 @@ namespace DigiSign
                             {
                                 Logger.Warning($"Failed to set PIN: {pinEx.Message}");
                                 Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
-                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
                                 // Continue and return the certificate - Windows will prompt for PIN
                             }
                         }
@@ -112,24 +109,20 @@ namespace DigiSign
                     if (store.Certificates.Count > 0)
                     {
                         Logger.Debug($"Available certificates in {location} store: {store.Certificates.Count}");
-                        LogToFile($"Debug;Available certificates in {location} store: {store.Certificates.Count}", "");
                         foreach (X509Certificate2 availableCert in store.Certificates)
                         {
                             Logger.Debug($"  - Subject: {availableCert.Subject}");
                             Logger.Debug($"    HasPrivateKey: {availableCert.HasPrivateKey}, Thumbprint: {availableCert.Thumbprint}");
-                            LogToFile($"Debug;  - Subject: {availableCert.Subject}, HasPrivateKey: {availableCert.HasPrivateKey}", "");
                         }
                     }
                     else
                     {
                         Logger.Debug($"No certificates found in {location} store");
-                        LogToFile($"Debug;No certificates found in {location} store", "");
                     }
                 }
                 catch (Exception ex)
                 {
                     Logger.Warning($"Error searching {location} store: {ex.Message}");
-                    LogToFile($"Warning;Error searching {location} store: {ex.Message}", "");
                 }
                 finally
                 {
@@ -141,7 +134,6 @@ namespace DigiSign
             if (!string.IsNullOrEmpty(xmlData.SelfSignedPath) && File.Exists(xmlData.SelfSignedPath))
             {
                 Logger.Info($"Using self-signed certificate from {xmlData.SelfSignedPath}");
-                LogToFile($"Info;Using self-signed certificate from {xmlData.SelfSignedPath}", "");
                 return new X509Certificate2(
                     xmlData.SelfSignedPath,
                     xmlData.SelfSignedPassword,
@@ -151,7 +143,6 @@ namespace DigiSign
 
             // Nothing found
             Logger.Error($"No USB token certificate or self-signed fallback found for '{commonName}'");
-            LogToFile($"Error;No USB token certificate or self-signed fallback found for '{commonName}'", "");
             return null;
         }
 
@@ -231,7 +222,7 @@ namespace DigiSign
                     }
                     catch (Exception ex)
                     {
-                        LogToFile($"Warning: TSA not available, proceeding without timestamp. {ex.Message}", outputFolderPath);
+                        Logger.Error($"Warning: TSA not available, proceeding without timestamp. {ex.Message}");
                     }
 
                     MakeSignature.SignDetached(
@@ -244,13 +235,12 @@ namespace DigiSign
                         0,
                         CryptoStandard.CMS
                     );
-
-                    LogToFile($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}", outputFolderPath);
+                    Logger.Info($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}");
                 }
             }
             catch (Exception ex)
             {
-                LogToFile($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}", outputFolderPath);
+                Logger.Error($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}");
             }
         }
 
@@ -293,7 +283,7 @@ namespace DigiSign
 
             if (x < 0 || y < 0 || x + width > pageWidth || y + height > pageHeight)
             {
-                LogToFile($"Error; Signature rectangle is outside page {page} boundaries. Adjusting coordinates", "");
+                Logger.Error($"Error; Signature rectangle is outside page {page} boundaries. Adjusting coordinates");
                 adjustedX = Math.Max(50, x);
                 adjustedY = Math.Max(50, y);
                 adjustedWidth = Math.Min(width, pageWidth - adjustedX - 50);
@@ -388,20 +378,6 @@ namespace DigiSign
                 wrappedLines.Add(currentLine);
 
             return wrappedLines;
-        }
-
-        private void LogToFile(string message, string outputFolderPath)
-        {
-            try
-            {
-                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
-                string logMessage = $"{message}";
-                File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
-            }
-            catch
-            {
-                // Silently fail
-            }
         }
     }
 }
