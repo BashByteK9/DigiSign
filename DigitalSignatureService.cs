@@ -41,7 +41,29 @@ namespace DigiSign
                         // Only set PIN if certificate has a private key
                         if (cert.HasPrivateKey)
                         {
-                            Logger.Debug("Certificate has private key, setting PIN");
+                            Logger.Debug("Certificate has private key, validating accessibility");
+
+                            // Validate that private key is actually accessible (USB token connected)
+                            try
+                            {
+                                using (var rsa = cert.GetRSAPrivateKey())
+                                {
+                                    if (rsa == null)
+                                    {
+                                        Logger.Error("Private key is not accessible - USB token may not be connected");
+                                        LogToFile($"Error;Private key not accessible for '{commonName}' - USB token may not be connected", "");
+                                        continue; // Try next store
+                                    }
+                                }
+                            }
+                            catch (Exception keyEx)
+                            {
+                                Logger.Error($"Private key is not accessible: {keyEx.Message} - USB token may not be connected");
+                                LogToFile($"Error;Private key not accessible: {keyEx.Message}", "");
+                                continue; // Try next store
+                            }
+
+                            // Now try to set PIN
                             try
                             {
                                 if (!string.IsNullOrEmpty(pin))
@@ -58,6 +80,7 @@ namespace DigiSign
                             {
                                 Logger.Warning($"Failed to set PIN: {pinEx.Message}");
                                 Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
+                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
                                 // Continue and return the certificate - Windows will prompt for PIN
                             }
                         }
@@ -78,7 +101,29 @@ namespace DigiSign
 
                         if (cert.HasPrivateKey)
                         {
-                            Logger.Debug("Certificate has private key, setting PIN");
+                            Logger.Debug("Certificate has private key, validating accessibility");
+
+                            // Validate that private key is actually accessible (USB token connected)
+                            try
+                            {
+                                using (var rsa = cert.GetRSAPrivateKey())
+                                {
+                                    if (rsa == null)
+                                    {
+                                        Logger.Error("Private key is not accessible - USB token may not be connected");
+                                        LogToFile($"Error;Private key not accessible for '{commonName}' - USB token may not be connected", "");
+                                        continue; // Try next store
+                                    }
+                                }
+                            }
+                            catch (Exception keyEx)
+                            {
+                                Logger.Error($"Private key is not accessible: {keyEx.Message} - USB token may not be connected");
+                                LogToFile($"Error;Private key not accessible: {keyEx.Message}", "");
+                                continue; // Try next store
+                            }
+
+                            // Now try to set PIN
                             try
                             {
                                 if (!string.IsNullOrEmpty(pin))
@@ -95,6 +140,7 @@ namespace DigiSign
                             {
                                 Logger.Warning($"Failed to set PIN: {pinEx.Message}");
                                 Logger.Info("Certificate will be used anyway - Windows will prompt for PIN during signing");
+                                LogToFile($"Warning;Failed to set PIN, user will be prompted: {pinEx.Message}", "");
                                 // Continue and return the certificate - Windows will prompt for PIN
                             }
                         }
@@ -241,6 +287,8 @@ namespace DigiSign
             catch (Exception ex)
             {
                 Logger.Error($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}");
+                LogToFile($"Error;Failed to sign PDF: {ex.Message}", outputFolderPath);
+                throw; // Re-throw so Program.cs can handle it properly
             }
         }
 
@@ -378,6 +426,20 @@ namespace DigiSign
                 wrappedLines.Add(currentLine);
 
             return wrappedLines;
+        }
+
+        private void LogToFile(string message, string outputFolderPath)
+        {
+            try
+            {
+                string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
+                string logMessage = $"{message}";
+                File.WriteAllText(logFilePath, logMessage + Environment.NewLine);
+            }
+            catch
+            {
+                // Silently fail
+            }
         }
     }
 }
