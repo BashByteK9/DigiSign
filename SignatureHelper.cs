@@ -30,21 +30,33 @@ namespace DigiSign
 
             public byte[] Sign(byte[] message)
             {
-                // Use the legacy PrivateKey property to ensure PIN settings are respected
-                // This is necessary for USB tokens where PIN has been set via SetPinForPrivateKey
-                if (_certificate.PrivateKey is RSACryptoServiceProvider rsaCsp)
+                HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
+
+                // Try to use the legacy PrivateKey property for CSP-based certificates
+                // This ensures PIN settings are respected for legacy USB tokens
+                try
                 {
-                    HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
-                    return rsaCsp.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
+                    var privateKey = _certificate.PrivateKey;
+                    if (privateKey is RSACryptoServiceProvider rsaCsp)
+                    {
+                        Logger.Debug("Using legacy RSACryptoServiceProvider for signing");
+                        return rsaCsp.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // PrivateKey property throws exception for CNG certificates
+                    Logger.Debug($"PrivateKey access failed (likely CNG certificate): {ex.Message}");
                 }
 
-                // Fallback to GetRSAPrivateKey for certificates not using CSP
+                // Use GetRSAPrivateKey for CNG-based certificates (modern USB tokens)
+                Logger.Debug("Using GetRSAPrivateKey for signing (CNG)");
                 using (var rsa = _certificate.GetRSAPrivateKey())
                 {
                     if (rsa == null)
                         throw new InvalidOperationException("RSA private key not found.");
 
-                    HashAlgorithmName hashAlgorithm = HashAlgorithmName.SHA256;
+                    // For CNG keys, Windows will prompt for PIN if needed
                     return rsa.SignData(message, hashAlgorithm, RSASignaturePadding.Pkcs1);
                 }
             }
