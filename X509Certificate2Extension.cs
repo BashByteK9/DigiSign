@@ -42,17 +42,20 @@ namespace DigiSign
             // Fallback to legacy CSP approach
             try
             {
-                if (certificate.PrivateKey == null)
+                // Accessing PrivateKey can throw for CNG certificates
+                var privateKey = certificate.PrivateKey;
+
+                if (privateKey == null)
                 {
                     throw new InvalidOperationException("Certificate does not have a private key");
                 }
 
-                if (!(certificate.PrivateKey is RSACryptoServiceProvider))
+                if (!(privateKey is RSACryptoServiceProvider))
                 {
-                    throw new InvalidOperationException("Certificate uses unsupported provider type");
+                    throw new InvalidOperationException("Certificate uses CNG provider, CSP PIN setting not applicable");
                 }
 
-                var key = (RSACryptoServiceProvider)certificate.PrivateKey;
+                var key = (RSACryptoServiceProvider)privateKey;
 
                 var providerHandle = IntPtr.Zero;
                 var pinBuffer = Encoding.ASCII.GetBytes(pin);
@@ -70,9 +73,19 @@ namespace DigiSign
                                                 certificate.Handle,
                                                 SafeNativeMethods.CertificateProperty.CryptoProviderHandle,
                                                 0, providerHandle));
+
+                Logger.Debug("CSP PIN set successfully");
+            }
+            catch (CryptographicException cex) when (cex.Message.Contains("Invalid provider type"))
+            {
+                // This is a CNG certificate, not a CSP certificate
+                // CNG PIN setting already failed above, so we can't set the PIN
+                Logger.Debug("Certificate uses CNG provider - PIN cannot be set programmatically");
+                throw new InvalidOperationException($"Failed to set PIN: {cex.Message}", cex);
             }
             catch (Exception ex)
             {
+                Logger.Debug($"CSP PIN setting failed: {ex.Message}");
                 throw new InvalidOperationException($"Failed to set PIN: {ex.Message}", ex);
             }
         }
@@ -87,32 +100,47 @@ namespace DigiSign
             try
             {
                 // Get the private key handle from the certificate
+                // Use CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG to properly work with CNG keys
+                // Remove SILENT flag to allow UI if needed for initial authentication
                 if (!SafeNativeMethods.CryptAcquireCertificatePrivateKey(
                     certContext,
-                    SafeNativeMethods.CRYPT_ACQUIRE_CACHE_FLAG | SafeNativeMethods.CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
+                    SafeNativeMethods.CRYPT_ACQUIRE_CACHE_FLAG | SafeNativeMethods.CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG,
                     IntPtr.Zero,
                     out keyHandle,
                     out keySpec,
                     out callerFree))
                 {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to acquire CNG private key");
+                    int error = Marshal.GetLastWin32Error();
+                    Logger.Debug($"Failed to acquire private key, error code: {error} (0x{error:X})");
+                    throw new Win32Exception(error, "Failed to acquire CNG private key");
+                }
+
+                Logger.Debug($"Acquired key handle, keySpec: {keySpec} (0x{keySpec:X}), callerFree: {callerFree}");
+
+                // KeySpec will be CERT_NCRYPT_KEY_SPEC (0xFFFFFFFF) for CNG keys
+                if (keySpec != SafeNativeMethods.CERT_NCRYPT_KEY_SPEC)
+                {
+                    Logger.Debug($"Not a pure CNG key (keySpec={keySpec}), skipping CNG PIN setting");
+                    throw new InvalidOperationException("Not a CNG key");
                 }
 
                 // Set the PIN using NCryptSetProperty
+                // Use Unicode encoding as required by NCrypt API
                 byte[] pinBytes = Encoding.Unicode.GetBytes(pin);
                 int result = SafeNativeMethods.NCryptSetProperty(
                     keyHandle,
                     SafeNativeMethods.NCRYPT_PIN_PROPERTY,
                     pinBytes,
                     pinBytes.Length,
-                    0);
+                    SafeNativeMethods.NCRYPT_SILENT_FLAG);
 
                 if (result != 0)
                 {
+                    Logger.Debug($"NCryptSetProperty failed with error code: {result} (0x{result:X})");
                     throw new Win32Exception(result, "Failed to set CNG PIN property");
                 }
 
-                Logger.Debug("CNG PIN set successfully");
+                Logger.Debug("CNG PIN set successfully - PIN will be cached for subsequent operations");
             }
             finally
             {
@@ -148,7 +176,12 @@ namespace DigiSign
         // CNG constants
         internal const int CRYPT_ACQUIRE_CACHE_FLAG = 0x00000001;
         internal const int CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG = 0x00040000;
+        internal const int CRYPT_ACQUIRE_COMPARE_KEY_FLAG = 0x00000004;
+        internal const int CRYPT_ACQUIRE_SILENT_FLAG = 0x00000040;
+        internal const int CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG = 0x00010000;
+        internal const int CERT_NCRYPT_KEY_SPEC = unchecked((int)0xFFFFFFFF);
         internal const string NCRYPT_PIN_PROPERTY = "SmartCardPin";
+        internal const int NCRYPT_SILENT_FLAG = 0x00000001;
 
         // CSP P/Invoke declarations
         [DllImport("advapi32.dll", CharSet = CharSet.Auto, SetLastError = true)]
