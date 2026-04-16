@@ -68,6 +68,7 @@ namespace DigiSign
         private TabPage tabPreview;
         private PictureBox picPreview;
         private Button btnRefreshPreview;
+        private Button btnSignPdf;
         private Label lblPreviewInfo;
         private ComboBox cmbPreviewPage;
         private Label lblZoom;
@@ -83,6 +84,10 @@ namespace DigiSign
         private Point lastMousePosition;
         private RectangleF signatureRect;
         private const int HANDLE_SIZE = 8;
+
+        // Store actual PDF dimensions for accurate resize handle positioning
+        private float currentPdfWidth = 595f;  // Default to A4
+        private float currentPdfHeight = 842f; // Default to A4
         
         private enum ResizeHandle
         {
@@ -396,8 +401,24 @@ namespace DigiSign
             CreateGeneralSettingsTab();
             CreateSignatureSettingsTab();
             CreatePreviewTab();
-            
+
             // Settings buttons
+            // Sign PDF button on the left
+            btnSignPdf = new Button
+            {
+                Text = "Sign PDF",
+                Size = new Size(120, 35),
+                Location = new Point(20, 470),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnSignPdf.FlatAppearance.BorderSize = 0;
+            btnSignPdf.Click += BtnSignPdf_Click;
+            tabSettings.Controls.Add(btnSignPdf);
+
             btnResetSettings = new Button
             {
                 Text = "Reset to Defaults",
@@ -407,7 +428,7 @@ namespace DigiSign
             };
             btnResetSettings.Click += BtnResetSettings_Click;
             tabSettings.Controls.Add(btnResetSettings);
-            
+
             btnSaveSettings = new Button
             {
                 Text = "Save Settings",
@@ -873,7 +894,7 @@ namespace DigiSign
                 ForeColor = Color.FromArgb(100, 100, 100)
             };
             tabPreview.Controls.Add(lblInstruction);
-            
+
             // Initialize with blank preview
             UpdatePreview();
         }
@@ -1389,25 +1410,25 @@ namespace DigiSign
         
         private RectangleF GetSignatureScreenRect()
         {
-            // Get PDF dimensions (base A4)
-            float pdfWidth = 595f;
-            float pdfHeight = 842f;
-            
+            // Use actual PDF dimensions instead of hardcoded values
+            float pdfWidth = currentPdfWidth;
+            float pdfHeight = currentPdfHeight;
+
             // Get signature settings in PDF coordinates
             float x = (float)numXCoord.Value;
             float y = (float)numYCoord.Value;
             float width = (float)numWidth.Value;
             float height = (float)numHeight.Value;
-            
+
             // Apply zoom scale
             float scale = zoomLevel;
-            
+
             // Convert to screen coordinates
             float screenX = x * scale;
             float screenY = (pdfHeight - y - height) * scale; // PDF coords start at bottom-left
             float screenWidth = width * scale;
             float screenHeight = height * scale;
-            
+
             return new RectangleF(screenX, screenY, screenWidth, screenHeight);
         }
         
@@ -1721,6 +1742,10 @@ namespace DigiSign
                     // Get page size
                     float pdfWidth = pdfDoc.Pages[pageNumber - 1].Size.Width;
                     float pdfHeight = pdfDoc.Pages[pageNumber - 1].Size.Height;
+
+                    // Store actual PDF dimensions for resize handle positioning
+                    currentPdfWidth = pdfWidth;
+                    currentPdfHeight = pdfHeight;
                     
                     // Render the PDF page to an image using Spire.Pdf
                     // SaveAsImage returns System.Drawing.Image
@@ -1789,6 +1814,10 @@ namespace DigiSign
                             var pageSize = reader.GetPageSizeWithRotation(pageNumber);
                             float pdfWidth = pageSize.Width;
                             float pdfHeight = pageSize.Height;
+
+                            // Store actual PDF dimensions for resize handle positioning
+                            currentPdfWidth = pdfWidth;
+                            currentPdfHeight = pdfHeight;
                             
                             // Draw placeholder representation with error message
                             g.FillRectangle(Brushes.WhiteSmoke, 0, 0, width, height);
@@ -1854,7 +1883,11 @@ namespace DigiSign
             // Base size for A4 at 72 DPI
             int baseWidth = 595;
             int baseHeight = 842;
-            
+
+            // Store dimensions for resize handle positioning
+            currentPdfWidth = baseWidth;
+            currentPdfHeight = baseHeight;
+
             // Apply zoom
             int width = (int)(baseWidth * zoomLevel);
             int height = (int)(baseHeight * zoomLevel);
@@ -1936,61 +1969,299 @@ namespace DigiSign
             float y = (float)numYCoord.Value * scale;
             float width = (float)numWidth.Value * scale;
             float height = (float)numHeight.Value * scale;
-            
+
             // Adjust Y coordinate (PDF coordinates start from bottom-left, screen from top-left)
             float scaledPdfHeight = pdfHeight * scale;
             float adjustedY = scaledPdfHeight - y - height;
-            
-            // Draw signature rectangle with semi-transparent fill
-            using (Brush fillBrush = new SolidBrush(Color.FromArgb(100, 0, 120, 215)))
+
+            // Draw signature rectangle with white/light background (matching actual PDF)
+            using (Brush fillBrush = new SolidBrush(Color.FromArgb(250, 250, 250, 250)))
             {
                 g.FillRectangle(fillBrush, x, adjustedY, width, height);
             }
-            
-            // Draw border
-            using (Pen borderPen = new Pen(Color.FromArgb(0, 120, 215), 2 * scale))
+
+            // Draw solid border (matching actual PDF)
+            using (Pen borderPen = new Pen(Color.Black, 1 * scale))
             {
-                borderPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawRectangle(borderPen, x, adjustedY, width, height);
             }
-            
-            // Draw signature text preview
-            string signatureText = "Digital Signature";
+
+            // Draw signature text preview - matching actual PDF text rendering
+            // Actual PDF draws from top-left with padding, not centered
+            float padding = 3 * scale;
+            float fontSizeCN = 10 * scale;
+            float fontSizeText = 9 * scale;
+            float lineHeight = fontSizeCN + 3 * scale;
+            float currentY = adjustedY + padding;
+
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+
+            // Draw Common Name (bold, larger font)
             if (!string.IsNullOrWhiteSpace(txtCommonName.Text))
             {
-                signatureText += $"\n{txtCommonName.Text}";
-            }
-            signatureText += $"\n{DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-            
-            using (StringFormat sf = new StringFormat())
-            {
-                sf.Alignment = StringAlignment.Center;
-                sf.LineAlignment = StringAlignment.Center;
-                
-                using (Font sigFont = new Font("Segoe UI", 8 * scale))
+                using (Font cnFont = new Font("Times New Roman", fontSizeCN, FontStyle.Bold))
                 {
-                    g.DrawString(signatureText, 
-                        sigFont, 
-                        Brushes.White, 
-                        new RectangleF(x, adjustedY, width, height), 
-                        sf);
+                    g.DrawString(txtCommonName.Text, 
+                        cnFont, 
+                        Brushes.Black, 
+                        new PointF(x + padding, currentY));
+                    currentY += lineHeight;
                 }
             }
-            
-            
-            // Draw dimension labels
+
+            // Draw empty line (matching actual PDF)
+            currentY += fontSizeText;
+
+            // Draw Date
+            using (Font textFont = new Font("Helvetica", fontSizeText, FontStyle.Regular))
+            {
+                string dateText = $"Date: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+                g.DrawString(dateText, 
+                    textFont, 
+                    Brushes.Black, 
+                    new PointF(x + padding, currentY));
+            }
+
+            // Draw dimension labels (for debugging/preview)
             using (Font labelFont = new Font("Segoe UI", 7 * scale))
             {
                 g.DrawString($"X: {numXCoord.Value}, Y: {numYCoord.Value}", 
                     labelFont, 
                     Brushes.Blue, 
                     new PointF(x, adjustedY - 15 * scale));
-                
+
                 g.DrawString($"{numWidth.Value} x {numHeight.Value} px", 
                     labelFont, 
                     Brushes.Blue, 
                     new PointF(x, adjustedY + height + 5 * scale));
             }
+        }
+
+        private void BtnSignPdf_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // Get input PDF path
+                string inputPdfPath = txtInputFile.Text;
+
+                // Check if we have a valid input file or should use mock PDF
+                bool usingMockPdf = string.IsNullOrEmpty(inputPdfPath) || !File.Exists(inputPdfPath);
+
+                if (usingMockPdf)
+                {
+                    // Ask user if they want to select a PDF or create a blank one
+                    DialogResult result = MessageBox.Show(
+                        "No input PDF file is selected.\n\n" +
+                        "Click 'Yes' to select a PDF file to sign\n" +
+                        "Click 'No' to create and sign a blank PDF document",
+                        "Select PDF",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+
+                    if (result == DialogResult.Cancel)
+                        return;
+
+                    if (result == DialogResult.Yes)
+                    {
+                        // Let user select a PDF file
+                        using (OpenFileDialog openDialog = new OpenFileDialog())
+                        {
+                            openDialog.Title = "Select PDF to Sign";
+                            openDialog.Filter = "PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*";
+                            openDialog.DefaultExt = "pdf";
+                            openDialog.CheckFileExists = true;
+
+                            if (openDialog.ShowDialog() != DialogResult.OK)
+                                return;
+
+                            inputPdfPath = openDialog.FileName;
+                            usingMockPdf = false;
+                        }
+                    }
+                    else // DialogResult.No - create blank PDF
+                    {
+                        // Create a temporary blank PDF
+                        inputPdfPath = Path.Combine(Path.GetTempPath(), $"blank_{Guid.NewGuid()}.pdf");
+                        CreateBlankPdf(inputPdfPath);
+                        usingMockPdf = true; // Still considered mock since we created it
+                    }
+                }
+
+                // Show SaveFileDialog for output
+                string defaultFileName = usingMockPdf 
+                    ? "signed_document.pdf" 
+                    : Path.GetFileNameWithoutExtension(inputPdfPath) + "_signed.pdf";
+
+                using (SaveFileDialog saveDialog = new SaveFileDialog())
+                {
+                    saveDialog.Title = "Save Signed PDF As";
+                    saveDialog.Filter = "PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*";
+                    saveDialog.DefaultExt = "pdf";
+                    saveDialog.FileName = defaultFileName;
+                    saveDialog.OverwritePrompt = true;
+
+                    if (saveDialog.ShowDialog() != DialogResult.OK)
+                    {
+                        // Clean up temp file if we created one
+                        if (usingMockPdf && inputPdfPath.StartsWith(Path.GetTempPath()))
+                            File.Delete(inputPdfPath);
+                        return;
+                    }
+
+                    string outputPdfPath = saveDialog.FileName;
+
+                    // Get certificate and signing parameters
+                    string commonName = txtCommonName.Text;
+                    string pin = txtPin.Text;
+
+                    if (string.IsNullOrWhiteSpace(commonName))
+                    {
+                        MessageBox.Show(
+                            "Please enter a certificate Common Name in the General settings tab.",
+                            "Certificate Required",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    // Create signature configuration from current settings
+                    var signatureConfig = new SignatureConfiguration(
+                        (float)numXCoord.Value,
+                        (float)numYCoord.Value,
+                        (float)numWidth.Value,
+                        (float)numHeight.Value,
+                        GetSignOnPageValue());
+
+                    // Load XML data for certificate fallback options
+                    string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
+                    var xmlData = ReadXmlDataFromForm();
+
+                    // Use DigitalSignatureService to sign
+                    var signatureService = new DigitalSignatureService();
+
+                    // Show progress
+                    this.Cursor = Cursors.WaitCursor;
+                    btnSignPdf.Enabled = false;
+                    btnSignPdf.Text = "Signing...";
+                    Application.DoEvents();
+
+                    try
+                    {
+                        // Load certificate
+                        var cert = signatureService.LoadCertificate(commonName, pin, xmlData);
+
+                        if (cert == null)
+                        {
+                            MessageBox.Show(
+                                $"Certificate '{commonName}' not found.\n\n" +
+                                "Please ensure:\n" +
+                                "1. USB token is connected (if using USB certificate)\n" +
+                                "2. Certificate Common Name is correct\n" +
+                                "3. Certificate is installed in Windows certificate store",
+                                "Certificate Not Found",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                            return;
+                        }
+
+                        // Sign the PDF
+                        string outputFolder = Path.GetDirectoryName(outputPdfPath);
+                        signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolder);
+
+                        // Success
+                        MessageBox.Show(
+                            $"PDF signed successfully!\n\nSaved to:\n{outputPdfPath}",
+                            "Success",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+
+                        // Ask if user wants to open the folder
+                        DialogResult openFolder = MessageBox.Show(
+                            "Would you like to open the output folder?",
+                            "Open Folder",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+
+                        if (openFolder == DialogResult.Yes)
+                        {
+                            System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outputPdfPath}\"");
+                        }
+                    }
+                    finally
+                    {
+                        // Clean up temp file if we created one
+                        if (usingMockPdf && inputPdfPath.StartsWith(Path.GetTempPath()) && File.Exists(inputPdfPath))
+                        {
+                            try { File.Delete(inputPdfPath); } catch { }
+                        }
+
+                        // Restore button state
+                        this.Cursor = Cursors.Default;
+                        btnSignPdf.Enabled = true;
+                        btnSignPdf.Text = "Sign PDF";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Cursor = Cursors.Default;
+                btnSignPdf.Enabled = true;
+                btnSignPdf.Text = "Sign PDF";
+
+                MessageBox.Show(
+                    $"Error signing PDF:\n\n{ex.Message}\n\nSee logs for more details.",
+                    "Signing Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+
+                Logger.Error($"Error signing PDF from preview: {ex.Message}", ex);
+            }
+        }
+
+        private void CreateBlankPdf(string outputPath)
+        {
+            // Create a simple blank A4 PDF
+            var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4);
+            using (var writer = iTextSharp.text.pdf.PdfWriter.GetInstance(document, new FileStream(outputPath, FileMode.Create)))
+            {
+                document.Open();
+                document.Add(new iTextSharp.text.Paragraph("Blank Document"));
+                document.Add(new iTextSharp.text.Paragraph("\n\n"));
+                document.Add(new iTextSharp.text.Paragraph("This is a blank PDF document created for signing."));
+                document.Close();
+            }
+        }
+
+        private string GetSignOnPageValue()
+        {
+            // Get the sign on page setting from the combo box
+            if (cmbSignOnPage.SelectedItem != null)
+            {
+                string selected = cmbSignOnPage.SelectedItem.ToString();
+                if (selected.Contains("First")) return "F";
+                if (selected.Contains("Each")) return "E";
+                if (selected.Contains("Last")) return "L";
+            }
+            return "L"; // Default to Last
+        }
+
+        private XmlData ReadXmlDataFromForm()
+        {
+            // Create XmlData from form values for certificate loading
+            return new XmlData
+            {
+                CommonName = txtCommonName.Text,
+                Pin = txtPin.Text,
+                XCoordinate = (float)numXCoord.Value,
+                YCoordinate = (float)numYCoord.Value,
+                Width = (float)numWidth.Value,
+                Height = (float)numHeight.Value,
+                SignOnPage = GetSignOnPageValue(),
+                UseSelfSigned = cmbUseSelfSigned.SelectedItem?.ToString() == "Yes",
+                SelfSignedPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "selfsigned.pfx"),
+                SelfSignedPassword = "password"
+            };
         }
     }
 }

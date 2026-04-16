@@ -23,9 +23,9 @@ namespace DigiSign
     public static class Logger
     {
         private static readonly string LogDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+        private static readonly string PlfLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
         private static readonly long MaxLogFileSizeBytes = 1 * 1024 * 1024; // 1 MB
         private static string currentLogFilePath;
-        private static string currentPlfLogFilePath;
         private static bool logInitialized = false;
         private static readonly object logLock = new object();
 
@@ -53,18 +53,6 @@ namespace DigiSign
         }
 
         /// <summary>
-        /// Gets the current PLF log file path, creating a new one if needed
-        /// </summary>
-        private static string GetPlfLogFilePath()
-        {
-            if (string.IsNullOrEmpty(currentPlfLogFilePath) || !File.Exists(currentPlfLogFilePath))
-            {
-                currentPlfLogFilePath = Path.Combine(LogDirectory, "plf.txt");
-            }
-            return currentPlfLogFilePath;
-        }
-
-        /// <summary>
         /// Checks if log rotation is needed and rotates the log file if necessary
         /// </summary>
         /// <param name="logFilePath">Path to the log file to check</param>
@@ -84,14 +72,7 @@ namespace DigiSign
                     File.Move(logFilePath, rotatedLogPath);
 
                     // Update the current file path reference
-                    if (logFilePath == currentLogFilePath)
-                    {
-                        currentLogFilePath = logFilePath;
-                    }
-                    else if (logFilePath == currentPlfLogFilePath)
-                    {
-                        currentPlfLogFilePath = logFilePath;
-                    }
+                    currentLogFilePath = logFilePath;
                 }
             }
         }
@@ -220,12 +201,8 @@ namespace DigiSign
             {
                 lock (logLock)
                 {
-                    EnsureLogDirectoryExists();
-                    string plfLogFilePath = GetPlfLogFilePath();
-                    RotateLogIfNeeded(plfLogFilePath);
-
                     // Write only the message to PLF file (no timestamp, no status prefix)
-                    File.WriteAllText(plfLogFilePath, message + Environment.NewLine);
+                    File.WriteAllText(PlfLogFilePath, message + Environment.NewLine);
 
                     // Still log to application log with full details
                     if (isError)
