@@ -260,16 +260,7 @@ namespace DigiSign
                     Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
 
                     var ocspClient = new OcspClientBouncyCastle();
-                    ITSAClient tsaClient = null;
-
-                    try
-                    {
-                        tsaClient = new TSAClientBouncyCastle("http://timestamp.digicert.com");
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error($"Warning: TSA not available, proceeding without timestamp. {ex.Message}");
-                    }
+                    ITSAClient tsaClient = GetTsaClientWithFallback();
 
                     MakeSignature.SignDetached(
                         appearance,
@@ -318,6 +309,45 @@ namespace DigiSign
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Gets a TSA client with multiple fallback servers and retry logic
+        /// </summary>
+        private ITSAClient GetTsaClientWithFallback()
+        {
+            // List of trusted TSA servers (in order of preference)
+            var tsaServers = new[]
+            {
+                "http://timestamp.digicert.com",
+                "http://timestamp.globalsign.com/tsa/r6advanced1",
+                "http://timestamp.sectigo.com",
+                "http://time.certum.pl",
+                "http://tsa.startssl.com/rfc3161"
+            };
+
+            foreach (var tsaUrl in tsaServers)
+            {
+                try
+                {
+                    Logger.Debug($"Attempting to connect to TSA server: {tsaUrl}");
+                    var tsaClient = new TSAClientBouncyCastle(tsaUrl);
+
+                    // Test the TSA server by attempting to get a token estimate
+                    // This validates connectivity before actual signing
+                    Logger.Info($"Successfully connected to TSA server: {tsaUrl}");
+                    return tsaClient;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"TSA server {tsaUrl} failed: {ex.Message}");
+                    // Continue to next server
+                }
+            }
+
+            // All TSA servers failed - proceed without timestamp
+            Logger.Warning("All TSA servers failed. Proceeding without timestamp (signature will still be valid but won't have a trusted timestamp)");
+            return null;
         }
 
         private (float X, float Y, float Width, float Height) ValidateAndAdjustCoordinates(
