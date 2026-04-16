@@ -18,14 +18,83 @@ namespace DigiSign
 
     /// <summary>
     /// Static logger class for application-wide logging functionality
-    /// Provides file-based logging with thread-safe operations
+    /// Provides file-based logging with thread-safe operations and automatic log rotation
     /// </summary>
     public static class Logger
     {
-        private static readonly string LogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "application_log.txt");
-        private static readonly string PlfLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plf.txt");
+        private static readonly string LogDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+        private static readonly long MaxLogFileSizeBytes = 1 * 1024 * 1024; // 1 MB
+        private static string currentLogFilePath;
+        private static string currentPlfLogFilePath;
         private static bool logInitialized = false;
         private static readonly object logLock = new object();
+
+        /// <summary>
+        /// Ensures the logs directory exists
+        /// </summary>
+        private static void EnsureLogDirectoryExists()
+        {
+            if (!Directory.Exists(LogDirectory))
+            {
+                Directory.CreateDirectory(LogDirectory);
+            }
+        }
+
+        /// <summary>
+        /// Gets the current log file path, creating a new one if needed
+        /// </summary>
+        private static string GetLogFilePath()
+        {
+            if (string.IsNullOrEmpty(currentLogFilePath) || !File.Exists(currentLogFilePath))
+            {
+                currentLogFilePath = Path.Combine(LogDirectory, "application_log.txt");
+            }
+            return currentLogFilePath;
+        }
+
+        /// <summary>
+        /// Gets the current PLF log file path, creating a new one if needed
+        /// </summary>
+        private static string GetPlfLogFilePath()
+        {
+            if (string.IsNullOrEmpty(currentPlfLogFilePath) || !File.Exists(currentPlfLogFilePath))
+            {
+                currentPlfLogFilePath = Path.Combine(LogDirectory, "plf.txt");
+            }
+            return currentPlfLogFilePath;
+        }
+
+        /// <summary>
+        /// Checks if log rotation is needed and rotates the log file if necessary
+        /// </summary>
+        /// <param name="logFilePath">Path to the log file to check</param>
+        private static void RotateLogIfNeeded(string logFilePath)
+        {
+            if (File.Exists(logFilePath))
+            {
+                var fileInfo = new FileInfo(logFilePath);
+                if (fileInfo.Length >= MaxLogFileSizeBytes)
+                {
+                    // Create a timestamped backup of the current log
+                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    string fileName = Path.GetFileNameWithoutExtension(logFilePath);
+                    string extension = Path.GetExtension(logFilePath);
+                    string rotatedLogPath = Path.Combine(LogDirectory, $"{fileName}_{timestamp}{extension}");
+
+                    File.Move(logFilePath, rotatedLogPath);
+
+                    // Update the current file path reference
+                    if (logFilePath == currentLogFilePath)
+                    {
+                        currentLogFilePath = logFilePath;
+                    }
+                    else if (logFilePath == currentPlfLogFilePath)
+                    {
+                        currentPlfLogFilePath = logFilePath;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes the logger and creates log file with header information
@@ -38,6 +107,10 @@ namespace DigiSign
                 {
                     try
                     {
+                        EnsureLogDirectoryExists();
+
+                        string logFilePath = GetLogFilePath();
+
                         // Create log header
                         var header = new StringBuilder();
                         header.AppendLine("═══════════════════════════════════════════════════════════");
@@ -48,9 +121,9 @@ namespace DigiSign
                         header.AppendLine("═══════════════════════════════════════════════════════════");
                         header.AppendLine();
 
-                        File.WriteAllText(LogFilePath, header.ToString());
+                        File.WriteAllText(logFilePath, header.ToString());
                         logInitialized = true;
-                        
+
                         Log(LogLevel.INFO, "Logger initialized successfully");
                     }
                     catch (Exception ex)
@@ -76,6 +149,9 @@ namespace DigiSign
 
                 lock (logLock)
                 {
+                    string logFilePath = GetLogFilePath();
+                    RotateLogIfNeeded(logFilePath);
+
                     var logEntry = new StringBuilder();
                     logEntry.Append($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     logEntry.Append($" | {level,-8}");
@@ -92,7 +168,7 @@ namespace DigiSign
                         }
                     }
 
-                    File.AppendAllText(LogFilePath, logEntry.ToString() + Environment.NewLine);
+                    File.AppendAllText(logFilePath, logEntry.ToString() + Environment.NewLine);
                 }
             }
             catch
@@ -144,9 +220,13 @@ namespace DigiSign
             {
                 lock (logLock)
                 {
+                    EnsureLogDirectoryExists();
+                    string plfLogFilePath = GetPlfLogFilePath();
+                    RotateLogIfNeeded(plfLogFilePath);
+
                     // Write only the message to PLF file (no timestamp, no status prefix)
-                    File.WriteAllText(PlfLogFilePath, message + Environment.NewLine);
-                    
+                    File.WriteAllText(plfLogFilePath, message + Environment.NewLine);
+
                     // Still log to application log with full details
                     if (isError)
                         Error($"PLF Log: {message}");
@@ -172,7 +252,9 @@ namespace DigiSign
 
                 lock (logLock)
                 {
-                    File.AppendAllText(LogFilePath, new string('-', 80) + Environment.NewLine);
+                    string logFilePath = GetLogFilePath();
+                    RotateLogIfNeeded(logFilePath);
+                    File.AppendAllText(logFilePath, new string('-', 80) + Environment.NewLine);
                 }
             }
             catch
