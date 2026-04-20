@@ -255,13 +255,24 @@ namespace DigiSign
                         DrawSignatureAppearance(stamper, page, adjustedCoords, cn, signatureText);
                     }
 
-                    // Create signature with TSA retry logic
+                    // Create signature with resilient TSA client
                     IExternalSignature externalSignature = new SignatureHelper.SafeCertificateSignature(cert, "SHA-256");
                     Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
                     var ocspClient = new OcspClientBouncyCastle();
 
-                    // Try signing with TSA fallback
-                    SignWithTsaFallback(appearance, externalSignature, bcCert, ocspClient);
+                    // Use resilient TSA client that handles fallback internally
+                    ITSAClient tsaClient = new SignatureHelper.ResilientTSAClient();
+
+                    MakeSignature.SignDetached(
+                        appearance,
+                        externalSignature,
+                        new[] { bcCert },
+                        null,
+                        ocspClient,
+                        tsaClient,
+                        0,
+                        CryptoStandard.CMS
+                    );
 
                     Logger.Info($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}");
                 }
@@ -300,92 +311,6 @@ namespace DigiSign
             }
 
             return results;
-        }
-
-        /// <summary>
-        /// Signs the PDF with TSA fallback logic - tries multiple timestamp servers
-        /// </summary>
-        private void SignWithTsaFallback(PdfSignatureAppearance appearance, IExternalSignature externalSignature, 
-            Org.BouncyCastle.X509.X509Certificate bcCert, IOcspClient ocspClient)
-        {
-            // List of trusted TSA servers (in order of preference)
-            var tsaServers = new[]
-            {
-                "http://timestamp.digicert.com",
-                "http://timestamp.globalsign.com/tsa/r6advanced1",
-                "http://timestamp.sectigo.com",
-                "http://time.certum.pl",
-                "http://tsa.startssl.com/rfc3161"
-            };
-
-            Exception lastException = null;
-
-            // Try each TSA server
-            foreach (var tsaUrl in tsaServers)
-            {
-                try
-                {
-                    Logger.Debug($"Attempting to sign with TSA server: {tsaUrl}");
-                    ITSAClient tsaClient = new TSAClientBouncyCastle(tsaUrl);
-
-                    MakeSignature.SignDetached(
-                        appearance,
-                        externalSignature,
-                        new[] { bcCert },
-                        null,
-                        ocspClient,
-                        tsaClient,
-                        0,
-                        CryptoStandard.CMS
-                    );
-
-                    Logger.Info($"Successfully signed with TSA server: {tsaUrl}");
-                    return; // Success!
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-
-                    // Check if it's a network/DNS error
-                    if (ex.Message.Contains("could not be resolved") || 
-                        ex.Message.Contains("Unable to connect") ||
-                        ex.Message.Contains("timeout") ||
-                        ex.InnerException?.Message.Contains("could not be resolved") == true)
-                    {
-                        Logger.Warning($"TSA server {tsaUrl} unreachable: {ex.Message}");
-                        // Continue to next server
-                    }
-                    else
-                    {
-                        // Different error - might not be TSA related, rethrow
-                        Logger.Error($"Non-TSA error during signing: {ex.Message}");
-                        throw;
-                    }
-                }
-            }
-
-            // All TSA servers failed - try without timestamp as last resort
-            Logger.Warning("All TSA servers failed. Attempting to sign without timestamp...");
-            try
-            {
-                MakeSignature.SignDetached(
-                    appearance,
-                    externalSignature,
-                    new[] { bcCert },
-                    null,
-                    ocspClient,
-                    null, // No TSA client
-                    0,
-                    CryptoStandard.CMS
-                );
-
-                Logger.Warning("Signed successfully WITHOUT timestamp (signature is valid but has no trusted timestamp)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Failed to sign even without timestamp: {ex.Message}");
-                throw new InvalidOperationException($"Failed to sign PDF. Last TSA error: {lastException?.Message}", ex);
-            }
         }
 
         private (float X, float Y, float Width, float Height) ValidateAndAdjustCoordinates(

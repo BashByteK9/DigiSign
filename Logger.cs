@@ -102,7 +102,8 @@ namespace DigiSign
                         header.AppendLine("═══════════════════════════════════════════════════════════");
                         header.AppendLine();
 
-                        File.WriteAllText(logFilePath, header.ToString());
+                        // Append to existing log file instead of overwriting
+                        File.AppendAllText(logFilePath, header.ToString());
                         logInitialized = true;
 
                         Log(LogLevel.INFO, "Logger initialized successfully");
