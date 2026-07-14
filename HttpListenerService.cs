@@ -15,17 +15,21 @@ namespace DigiSign
         private readonly XmlData xmlData;
         private readonly IInvoiceDownloader downloader;
         private readonly DigitalSignatureService signatureService;
+        private readonly string licensePath;
+        private readonly Action<string> onLicenseIssue;
 
         private HttpListener listener;
         private Thread listenThread;
         private volatile bool stopping;
 
-        public HttpListenerService(int port, XmlData xmlData, IInvoiceDownloader downloader)
+        public HttpListenerService(int port, XmlData xmlData, IInvoiceDownloader downloader, string licensePath, Action<string> onLicenseIssue)
         {
             this.port = port;
             this.xmlData = xmlData;
             this.downloader = downloader;
             this.signatureService = new DigitalSignatureService();
+            this.licensePath = licensePath;
+            this.onLicenseIssue = onLicenseIssue;
         }
 
         public void Start()
@@ -132,6 +136,15 @@ namespace DigiSign
 
         private void ProcessSignRequest(HttpListenerContext context, DocumentType docType, string token)
         {
+            if (!LicenseManager.ValidateLicense(licensePath))
+            {
+                string msg = $"Signing request for {docType}/{token} was rejected: no valid license is installed. Run 'DigiSign.exe /settings' or contact support for a license.";
+                Logger.Error(msg);
+                WriteJsonResponse(context, 403, false, null, "Valid license required for signing.");
+                onLicenseIssue(msg);
+                return;
+            }
+
             string tempInputPath = null;
             try
             {

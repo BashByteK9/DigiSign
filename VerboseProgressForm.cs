@@ -33,7 +33,7 @@ namespace DigiSign
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
             this.MinimizeBox = true;
-            this.Icon = SystemIcons.Application;
+            this.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
             this.FormClosing += VerboseProgressForm_FormClosing;
 
             int margin = 15;
@@ -237,7 +237,7 @@ namespace DigiSign
 
         public void AppendInfo(string text)
         {
-            AppendText("        \u2022 " + text + "\n", Color.Black); // • bullet point
+            AppendText("        \u2022 " + text + "\n", Color.Black); // ï¿½ bullet point
         }
 
         public void AppendDetail(string text)

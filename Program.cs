@@ -33,6 +33,7 @@ namespace DigiSign
         public int Port { get; set; } = 8943;
         public string InvoiceApiBaseUrl { get; set; }
         public string InvoiceApiKey { get; set; }
+        public bool LaunchInBatchMode { get; set; } = false;
 
     }
 
@@ -65,10 +66,15 @@ namespace DigiSign
             // Check if admin mode or settings mode is requested FIRST (before verbose mode check)
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
             bool isSettingsMode = args.Length > 0 && args[0].Equals("/settings", StringComparison.OrdinalIgnoreCase);
-            bool isListenMode = args.Length > 0 && args[0].Equals("/listen", StringComparison.OrdinalIgnoreCase);
 
-            // Read XML data first to check verbose mode setting
+            // Read XML data first to check verbose mode setting and the batch-mode toggle
             var xmlData = ReadXmlData(xmlFilePath);
+
+            // No args: default to listener/tray mode unless the "launch in batch mode" toggle is set.
+            // Explicit "/listen" always forces listener mode regardless of the toggle.
+            bool isListenMode = args.Length == 0
+                ? !(xmlData?.LaunchInBatchMode ?? false)
+                : args[0].Equals("/listen", StringComparison.OrdinalIgnoreCase);
 
             // Only enable verbose mode if NOT in admin mode, settings mode, or listen mode
             // Admin mode, settings mode, and listen mode are not the batch PDF-signing flow
@@ -183,6 +189,14 @@ namespace DigiSign
 
                 RunAdminMode(adminLicensePath);
                 return; // Exit after admin mode completes
+            }
+
+            // LISTENER MODE: Tray/HTTP listener must run regardless of license validity -
+            // license is checked per-request inside the listener instead of gating startup.
+            if (isListenMode)
+            {
+                RunListenMode(xmlData, licensePath);
+                return;
             }
 
             // PDF SIGNING MODE: Requires user license (license.txt)
@@ -310,12 +324,6 @@ namespace DigiSign
             if (File.Exists(adminLicensePath) && LicenseManager.ValidateAdminLicense(adminLicensePath))
             {
                 Logger.Info("Admin license detected but not running in admin mode");
-            }
-
-            if (isListenMode)
-            {
-                RunListenMode(xmlData);
-                return;
             }
 
             Logger.LogSeparator();
@@ -725,7 +733,7 @@ namespace DigiSign
             Logger.Info("Application ended");
         }
 
-        static void RunListenMode(XmlData xmlData)
+        static void RunListenMode(XmlData xmlData, string licensePath)
         {
             Logger.LogSeparator();
             Logger.Info("Listen mode requested - starting HTTP listener tray application");
@@ -743,47 +751,58 @@ namespace DigiSign
 
             int port = xmlData.Port > 0 ? xmlData.Port : 8943;
             var downloader = new PlaceholderInvoiceDownloader(xmlData.InvoiceApiBaseUrl, xmlData.InvoiceApiKey);
-            var listenerService = new HttpListenerService(port, xmlData, downloader);
 
-            try
+            using (var hostForm = new TrayHostForm())
             {
-                listenerService.Start();
-            }
-            catch (Exception ex)
-            {
-                Logger.Critical($"Failed to start HTTP listener on port {port}", ex);
-                MessageBox.Show(
-                    $"Failed to start listener on port {port}:\n{ex.Message}",
-                    "DigiSign Listener",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return;
-            }
+                var listenerService = new HttpListenerService(port, xmlData, downloader, licensePath,
+                    issue => hostForm.BeginInvoke(new Action(() =>
+                        MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))));
 
-            using (var trayIcon = new NotifyIcon())
-            {
-                var menu = new ContextMenuStrip();
-                menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
-                menu.Items.Add(new ToolStripSeparator());
-                menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                try
                 {
-                    try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
-                    catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
-                });
-                menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+                    listenerService.Start();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Critical($"Failed to start HTTP listener on port {port}", ex);
+                    MessageBox.Show(
+                        $"Failed to start listener on port {port}:\n{ex.Message}",
+                        "DigiSign Listener",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return;
+                }
 
-                trayIcon.Icon = SystemIcons.Application;
-                trayIcon.Text = $"DigiSign Listener (port {port})";
-                trayIcon.ContextMenuStrip = menu;
-                trayIcon.Visible = true;
+                using (var trayIcon = new NotifyIcon())
+                {
+                    var menu = new ContextMenuStrip();
+                    menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
+                    menu.Items.Add(new ToolStripSeparator());
+                    menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                    {
+                        try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
+                        catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
+                    });
+                    menu.Items.Add("Exit", null, (s, e) => Application.Exit());
 
-                Application.ApplicationExit += (s, e) => listenerService.Stop();
+                    trayIcon.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
+                    trayIcon.Text = $"DigiSign Listener (port {port})";
+                    trayIcon.ContextMenuStrip = menu;
+                    trayIcon.MouseClick += (s, e) =>
+                    {
+                        if (e.Button == MouseButtons.Left) RunSettingsMode();
+                    };
+                    trayIcon.Visible = true;
 
-                Logger.Info($"Listener running on http://localhost:{port}/ - waiting for requests");
-                Application.Run();
+                    Application.ApplicationExit += (s, e) => listenerService.Stop();
+
+                    Logger.Info($"Listener running on http://localhost:{port}/ - waiting for requests");
+                    Application.Run(hostForm);
+                }
+
+                listenerService.Dispose();
             }
 
-            listenerService.Dispose();
             Logger.Info("Listen mode exited");
         }
 
@@ -950,6 +969,14 @@ namespace DigiSign
                 if (fileNameLists.Count > 14)
                 {
                     xmlData.InvoiceApiKey = fileNameLists[14].Element("FILENAME")?.Value?.Trim();
+                }
+
+                // Optional index 15: LaunchInBatchMode flag (default N = launch to listener/tray)
+                if (fileNameLists.Count > 15)
+                {
+                    string batchFlag = fileNameLists[15].Element("FILENAME")?.Value?.Trim().ToUpper();
+                    xmlData.LaunchInBatchMode = (batchFlag == "Y");
+                    Logger.Debug($"LaunchInBatchMode from XML: {xmlData.LaunchInBatchMode}");
                 }
 
                 Logger.Info("XML configuration loaded successfully");

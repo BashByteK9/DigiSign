@@ -69,7 +69,7 @@ namespace DigiSign
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Icon = SystemIcons.Application;
+            this.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
             
             int margin = 20;
             int currentY = margin;

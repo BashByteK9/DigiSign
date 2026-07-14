@@ -44,6 +44,7 @@ namespace DigiSign
         private TextBox txtPin;
         private CheckBox chkShowPin;
         private CheckBox chkVerboseMode;
+        private CheckBox chkBatchMode;
 
         // API Settings Tab (listener / invoice-label download configuration)
         private TabPage tabApiSettings;
@@ -152,7 +153,7 @@ namespace DigiSign
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
             this.MinimizeBox = true;
-            this.Icon = SystemIcons.Application;
+            this.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
             
             int margin = 20;
             int currentY = margin;
@@ -694,6 +695,17 @@ namespace DigiSign
                 ForeColor = Color.FromArgb(0, 102, 204)
             };
             tabGeneral.Controls.Add(chkVerboseMode);
+            currentY += 30;
+
+            // Batch Mode toggle
+            chkBatchMode = new CheckBox
+            {
+                Text = "Launch in batch signing mode (instead of listener/tray) when started with no arguments",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabGeneral.Controls.Add(chkBatchMode);
         }
         
         private void CreateSignatureSettingsTab()
@@ -1176,6 +1188,17 @@ namespace DigiSign
                 txtInvoiceApiKey.Text = fileNameLists.Count > 14
                     ? fileNameLists[14].Element("FILENAME")?.Value ?? ""
                     : "";
+
+                // Load batch mode toggle (index 15)
+                if (fileNameLists.Count > 15)
+                {
+                    string batchMode = fileNameLists[15].Element("FILENAME")?.Value ?? "N";
+                    chkBatchMode.Checked = batchMode.ToUpper() == "Y";
+                }
+                else
+                {
+                    chkBatchMode.Checked = false;
+                }
             }
             catch (Exception)
             {
@@ -1200,6 +1223,7 @@ namespace DigiSign
             numListenerPort.Value = 8943;
             txtInvoiceApiBaseUrl.Text = "";
             txtInvoiceApiKey.Text = "";
+            chkBatchMode.Checked = false; // Default to listener/tray mode
         }
         
         private void BtnSaveSettings_Click(object sender, EventArgs e)
@@ -1274,6 +1298,10 @@ namespace DigiSign
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", txtInvoiceApiKey.Text),
                                 new XComment(" Invoice/Label download API key (placeholder, used by '/listen' mode) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", chkBatchMode.Checked ? "Y" : "N"),
+                                new XComment(" LaunchInBatchMode: Y=no-args launch runs batch PDF signing, N=no-args launch opens listener/tray, default value=N ")
                             )
                         )
                     )
