@@ -44,7 +44,18 @@ namespace DigiSign
         private TextBox txtPin;
         private CheckBox chkShowPin;
         private CheckBox chkVerboseMode;
-        
+
+        // API Settings Tab (listener / invoice-label download configuration)
+        private TabPage tabApiSettings;
+        private Label lblListenerPort;
+        private NumericUpDown numListenerPort;
+        private Label lblInvoiceApiBaseUrl;
+        private TextBox txtInvoiceApiBaseUrl;
+        private Label lblInvoiceApiKey;
+        private TextBox txtInvoiceApiKey;
+        private CheckBox chkShowApiKey;
+        private Label lblApiSettingsNote;
+
         // Settings Tab - Signature
         private TabPage tabSignature;
         private Label lblXCoord;
@@ -188,7 +199,8 @@ namespace DigiSign
                 CreateLicenseGenerationTab();
             }
             CreateSettingsTab();
-            
+            CreateApiSettingsTab();
+
             // Select Settings tab by default in settings-only mode
             if (settingsOnlyMode && tabControl.TabPages.Count > 0)
             {
@@ -443,7 +455,104 @@ namespace DigiSign
             btnSaveSettings.Click += BtnSaveSettings_Click;
             tabSettings.Controls.Add(btnSaveSettings);
         }
-        
+
+        private void CreateApiSettingsTab()
+        {
+            tabApiSettings = new TabPage("API Settings");
+            tabControl.TabPages.Add(tabApiSettings);
+
+            int leftMargin = 20;
+            int currentY = 20;
+            int labelHeight = 20;
+            int textBoxHeight = 24;
+            int spacing = 10;
+
+            lblApiSettingsNote = new Label
+            {
+                Text = "Used only when running 'DigiSign.exe /listen'. The invoice/label download API is a placeholder - configure it once the real API is available.",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(720, 40),
+                Font = new Font("Segoe UI", 9, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 100, 100)
+            };
+            tabApiSettings.Controls.Add(lblApiSettingsNote);
+            currentY += 50;
+
+            // Listener Port
+            lblListenerPort = new Label
+            {
+                Text = "Listener Port:",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(200, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabApiSettings.Controls.Add(lblListenerPort);
+
+            numListenerPort = new NumericUpDown
+            {
+                Location = new Point(leftMargin + 210, currentY),
+                Size = new Size(120, textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                Minimum = 1024,
+                Maximum = 65535,
+                DecimalPlaces = 0,
+                Value = 8943
+            };
+            tabApiSettings.Controls.Add(numListenerPort);
+            currentY += textBoxHeight + spacing + 10;
+
+            // Invoice/Label API Base URL
+            lblInvoiceApiBaseUrl = new Label
+            {
+                Text = "Invoice/Label Download API Base URL:",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabApiSettings.Controls.Add(lblInvoiceApiBaseUrl);
+            currentY += labelHeight + 5;
+
+            txtInvoiceApiBaseUrl = new TextBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, textBoxHeight),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabApiSettings.Controls.Add(txtInvoiceApiBaseUrl);
+            currentY += textBoxHeight + spacing + 10;
+
+            // Invoice/Label API Key
+            lblInvoiceApiKey = new Label
+            {
+                Text = "Invoice/Label Download API Key:",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabApiSettings.Controls.Add(lblInvoiceApiKey);
+            currentY += labelHeight + 5;
+
+            txtInvoiceApiKey = new TextBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                PasswordChar = '*'
+            };
+            tabApiSettings.Controls.Add(txtInvoiceApiKey);
+            currentY += textBoxHeight + 5;
+
+            chkShowApiKey = new CheckBox
+            {
+                Text = "Show API Key",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(150, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            chkShowApiKey.CheckedChanged += ChkShowApiKey_CheckedChanged;
+            tabApiSettings.Controls.Add(chkShowApiKey);
+        }
+
         private void CreateGeneralSettingsTab()
         {
             tabGeneral = new TabPage("General");
@@ -812,7 +921,7 @@ namespace DigiSign
             
             btnZoomOut = new Button
             {
-                Text = "–",  // En dash (better visibility)
+                Text = "ï¿½",  // En dash (better visibility)
                 Location = new Point(leftMargin + 255, currentY - 2),
                 Size = new Size(30, 28),
                 Font = new Font("Segoe UI", 12, FontStyle.Bold)
@@ -977,7 +1086,12 @@ namespace DigiSign
                 txtPin.PasswordChar = '*';
             }
         }
-        
+
+        private void ChkShowApiKey_CheckedChanged(object sender, EventArgs e)
+        {
+            txtInvoiceApiKey.PasswordChar = chkShowApiKey.Checked ? '\0' : '*';
+        }
+
         private void LoadSettings()
         {
             try
@@ -1040,13 +1154,35 @@ namespace DigiSign
                 {
                     chkVerboseMode.Checked = false; // Default to not verbose
                 }
+
+                // Load listener port (index 12)
+                if (fileNameLists.Count > 12 &&
+                    int.TryParse(fileNameLists[12].Element("FILENAME")?.Value, out int listenerPort) &&
+                    listenerPort >= 1024 && listenerPort <= 65535)
+                {
+                    numListenerPort.Value = listenerPort;
+                }
+                else
+                {
+                    numListenerPort.Value = 8943;
+                }
+
+                // Load invoice/label API base URL (index 13)
+                txtInvoiceApiBaseUrl.Text = fileNameLists.Count > 13
+                    ? fileNameLists[13].Element("FILENAME")?.Value ?? ""
+                    : "";
+
+                // Load invoice/label API key (index 14)
+                txtInvoiceApiKey.Text = fileNameLists.Count > 14
+                    ? fileNameLists[14].Element("FILENAME")?.Value ?? ""
+                    : "";
             }
             catch (Exception)
             {
                 LoadDefaultSettings();
             }
         }
-        
+
         private void LoadDefaultSettings()
         {
             txtInputFile.Text = "";
@@ -1061,6 +1197,9 @@ namespace DigiSign
             cmbOpenOutputFolder.SelectedIndex = 0;
             cmbUseSelfSigned.SelectedIndex = 1;
             chkVerboseMode.Checked = false; // Default to not verbose
+            numListenerPort.Value = 8943;
+            txtInvoiceApiBaseUrl.Text = "";
+            txtInvoiceApiKey.Text = "";
         }
         
         private void BtnSaveSettings_Click(object sender, EventArgs e)
@@ -1123,6 +1262,18 @@ namespace DigiSign
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", chkVerboseMode.Checked ? "Y" : "N"),
                                 new XComment(" VerboseMode: Y=Enable detailed signing logs, N=Normal mode, default value=N ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", numListenerPort.Value.ToString("0")),
+                                new XComment(" Listener Port: TCP port used by 'DigiSign.exe /listen' mode, default 8943 ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", txtInvoiceApiBaseUrl.Text),
+                                new XComment(" Invoice/Label download API base URL (placeholder, used by '/listen' mode) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", txtInvoiceApiKey.Text),
+                                new XComment(" Invoice/Label download API key (placeholder, used by '/listen' mode) ")
                             )
                         )
                     )
@@ -1772,7 +1923,7 @@ namespace DigiSign
                             titleFont, textBrush, 
                             new PointF(8 * zoomLevel, 6 * zoomLevel));
                         
-                        g.DrawString($"Page {pageNumber} of {totalPages} • {pdfWidth:F0} x {pdfHeight:F0} pt", 
+                        g.DrawString($"Page {pageNumber} of {totalPages} ï¿½ {pdfWidth:F0} x {pdfHeight:F0} pt", 
                             infoFont, textBrush, 
                             new PointF(8 * zoomLevel, 25 * zoomLevel));
                     }
@@ -1831,7 +1982,7 @@ namespace DigiSign
                                     titleFont, Brushes.DarkRed, 
                                     new PointF(10 * zoomLevel, 10 * zoomLevel));
                                 
-                                g.DrawString($"Page {pageNumber} of {totalPages} • Size: {pdfWidth:F0} x {pdfHeight:F0} pt", 
+                                g.DrawString($"Page {pageNumber} of {totalPages} ï¿½ Size: {pdfWidth:F0} x {pdfHeight:F0} pt", 
                                     infoFont, Brushes.Gray, 
                                     new PointF(10 * zoomLevel, 35 * zoomLevel));
                                 

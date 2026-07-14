@@ -1,19 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{FF02C0B6-207E-4FE6-81FE-2F9941F20664}</ProjectGuid>
+    <TargetFramework>net472</TargetFramework>
     <OutputType>WinExe</OutputType>
     <RootNamespace>DigiSign</RootNamespace>
     <AssemblyName>DigiSign</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
-    <NuGetPackageImportStamp>
-    </NuGetPackageImportStamp>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <PublishUrl>D:\Publish\Digisign\</PublishUrl>
     <Install>true</Install>
@@ -30,7 +27,10 @@
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
+    <StartupObject />
+    <NoWin32Manifest>true</NoWin32Manifest>
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
@@ -41,6 +41,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>pdbonly</DebugType>
@@ -50,176 +51,57 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+
   <PropertyGroup>
     <ManifestCertificateThumbprint>619B778805BC2A93DF59FC79F7D282BFD3A2E9BF</ManifestCertificateThumbprint>
-  </PropertyGroup>
-  <PropertyGroup>
     <ManifestKeyFile>DigiSign_TemporaryKey.pfx</ManifestKeyFile>
-  </PropertyGroup>
-  <PropertyGroup>
     <GenerateManifests>true</GenerateManifests>
-  </PropertyGroup>
-  <PropertyGroup>
     <SignManifests>false</SignManifests>
   </PropertyGroup>
-  <PropertyGroup>
-    <StartupObject />
-  </PropertyGroup>
-  <PropertyGroup>
-    <NoWin32Manifest>true</NoWin32Manifest>
-  </PropertyGroup>
+
   <ItemGroup>
-    <Reference Include="BouncyCastle.Cryptography, Version=2.0.0.0, Culture=neutral, PublicKeyToken=072edcf4a5328938, processorArchitecture=MSIL">
-      <HintPath>packages\BouncyCastle.Cryptography.2.4.0\lib\net461\BouncyCastle.Cryptography.dll</HintPath>
-    </Reference>
-    <Reference Include="itextsharp, Version=5.5.13.4, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
-      <HintPath>packages\iTextSharp.5.5.13.4\lib\net461\itextsharp.dll</HintPath>
-    </Reference>
-    <Reference Include="Microsoft.Bcl.Cryptography, Version=9.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\Microsoft.Bcl.Cryptography.9.0.9\lib\net462\Microsoft.Bcl.Cryptography.dll</HintPath>
-    </Reference>
-    <Reference Include="Pkcs11Interop, Version=5.3.0.0, Culture=neutral, PublicKeyToken=c10e9c2d8c006d2a, processorArchitecture=MSIL">
-      <HintPath>packages\Pkcs11Interop.5.3.0\lib\net45\Pkcs11Interop.dll</HintPath>
-    </Reference>
-    <Reference Include="SkiaSharp, Version=3.119.0.0, Culture=neutral, PublicKeyToken=0738eb9f132ed756, processorArchitecture=MSIL">
-      <HintPath>packages\SkiaSharp.3.119.1\lib\net462\SkiaSharp.dll</HintPath>
-    </Reference>
-    <Reference Include="Spire.Pdf, Version=11.9.17.0, Culture=neutral, PublicKeyToken=663f351905198cb3, processorArchitecture=MSIL">
-      <HintPath>packages\Spire.PDF.11.9.17\lib\net40\Spire.Pdf.dll</HintPath>
-    </Reference>
+    <Compile Remove="AdminKeyTester.cs" />
+    <Compile Remove="AdminLicenseValidator.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="System" />
-    <Reference Include="System.Buffers, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Buffers.4.6.1\lib\net462\System.Buffers.dll</HintPath>
-    </Reference>
-    <Reference Include="System.CodeDom, Version=9.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.CodeDom.9.0.9\lib\net462\System.CodeDom.dll</HintPath>
-    </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
-    <Reference Include="System.Formats.Asn1, Version=9.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Formats.Asn1.9.0.9\lib\net462\System.Formats.Asn1.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Management" />
-    <Reference Include="System.Memory, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Memory.4.6.3\lib\net462\System.Memory.dll</HintPath>
+    <Reference Include="System.Management, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+      <SpecificVersion>true</SpecificVersion>
     </Reference>
     <Reference Include="System.Numerics" />
-    <Reference Include="System.Numerics.Vectors, Version=4.1.6.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Numerics.Vectors.4.6.1\lib\net462\System.Numerics.Vectors.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=6.0.3.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.6.1.2\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
-    </Reference>
     <Reference Include="System.Security" />
-    <Reference Include="System.Security.Cryptography.Pkcs, Version=9.0.0.9, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Security.Cryptography.Pkcs.9.0.9\lib\net462\System.Security.Cryptography.Pkcs.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Text.Encoding.CodePages, Version=9.0.0.9, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Text.Encoding.CodePages.9.0.9\lib\net462\System.Text.Encoding.CodePages.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
+    <Reference Include="netstandard" />
     <Reference Include="System.Data" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
   </ItemGroup>
+
   <ItemGroup>
-    <Compile Include="DigitalSignatureService.cs" />
-    <Compile Include="LicenseGenerationForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="LicenseManager.cs" />
-    <Compile Include="Logger.cs" />
-    <Compile Include="Program.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="SettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="SignatureConfiguration.cs" />
-    <Compile Include="SignatureHelper.cs" />
-    <Compile Include="VerboseProgressForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="VersionInfo.cs" />
-    <Compile Include="X509Certificate2Extension.cs" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+    <PackageReference Include="iTextSharp" Version="5.5.13.4" />
+    <PackageReference Include="Microsoft.Bcl.Cryptography" Version="9.0.9" />
+    <PackageReference Include="Pkcs11Interop" Version="5.3.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
+    <PackageReference Include="Spire.Pdf" Version="11.9.17" />
+    <PackageReference Include="System.Buffers" Version="4.6.1" />
+    <PackageReference Include="System.CodeDom" Version="9.0.9" />
+    <PackageReference Include="System.Formats.Asn1" Version="9.0.9" />
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+    <PackageReference Include="System.Numerics.Vectors" Version="4.6.1" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.9" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.9" />
+    <PackageReference Include="System.ValueTuple" Version="4.6.1" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include=".github\upgrades\nuget-migration-plan.md" />
-    <None Include="documents\QUICK REFERENCE.md" />
-    <None Include="documents\ROOT CAUSE ANALYSIS.md" />
-    <None Include="documents\WORKING PDF SIGNER IMPLEMENTATION.md" />
-    <None Include="oldfiles\ACTUAL_PDF_CONTENT_SUMMARY.md" />
-    <None Include="admin.license.correct" />
-    <None Include="admin.license.example" />
-    <None Include="admin.license.template" />
-    <None Include="oldfiles\ADMIN_LICENSE_FIX.md" />
-    <None Include="oldfiles\ADMIN_LICENSE_SOLUTION.md" />
-    <None Include="oldfiles\ADMIN_MODE_CANCELLATION_FIX.md" />
-    <None Include="oldfiles\ADMIN_MODE_GUIDE.md" />
-    <None Include="oldfiles\ADMIN_MODE_IMPROVED_UX.md" />
-    <None Include="oldfiles\ADMIN_MODE_UPDATE.md" />
-    <None Include="oldfiles\ADMIN_MODE_VERBOSE_FIX.md" />
-    <None Include="oldfiles\ADMIN_MODE_WINDOWS_FORMS.md" />
-    <None Include="App.config" />
-    <None Include="oldfiles\APPLICATION_BEHAVIOR.md" />
-    <None Include="oldfiles\CHARACTER_ENCODING_FIX.md" />
-    <None Include="oldfiles\CHARACTER_ENCODING_FIX_QUICK_REF.md" />
-    <None Include="oldfiles\CONSOLE_BUFFER_FIX.md" />
-    <None Include="CreateAdminLicense.bat" />
-    <None Include="oldfiles\DATE_TAMPERING_PROTECTION.md" />
-    <None Include="oldfiles\DEMO_MODE_FIX_SUMMARY.md" />
-    <None Include="oldfiles\DEMO_MODE_NO_SIGNATURE.md" />
-    <None Include="oldfiles\DEMO_MODE_NO_SIGNER_NAME.md" />
-    <None Include="oldfiles\DEMO_MODE_QUICK_CARD.md" />
-    <None Include="oldfiles\DEMO_MODE_VERIFICATION.md" />
-    <None Include="oldfiles\DigiSign_Admin.bat" />
-    <None Include="DigiSign_TemporaryKey.pfx" />
-    <None Include="oldfiles\ERROR_TRACKING.md" />
-    <None Include="oldfiles\FIX_SUMMARY.md" />
-    <None Include="oldfiles\GenerateAdminLicense.ps1" />
-    <None Include="oldfiles\INTERACTIVE_PLACEMENT_VISUAL_GUIDE.md" />
-    <None Include="oldfiles\INTERACTIVE_SIGNATURE_PLACEMENT.md" />
-    <None Include="oldfiles\LICENSE_BUTTONS_IN_TAB.md" />
-    <None Include="oldfiles\LICENSE_ENFORCEMENT.md" />
-    <None Include="oldfiles\LICENSE_EXPIRATION_WARNING.md" />
-    <None Include="oldfiles\LICENSE_QUICK_REFERENCE.md" />
-    <None Include="oldfiles\LICENSE_SYSTEM.md" />
-    <None Include="oldfiles\LOGGING_SYSTEM.md" />
-    <None Include="oldfiles\LOGGING_UPDATE_SUMMARY.md" />
-    <None Include="packages.config" />
-    <None Include="oldfiles\PDF_ACTUAL_CONTENT_RENDERING.md" />
-    <None Include="oldfiles\PDF_PREVIEW_FIXES_SUMMARY.md" />
-    <None Include="oldfiles\PDF_PREVIEW_LAYOUT_EXPLANATION.md" />
-    <None Include="oldfiles\PDF_PREVIEW_QUICK_REFERENCE.md" />
-    <None Include="oldfiles\PDF_PREVIEW_TROUBLESHOOTING.md" />
-    <None Include="oldfiles\PDF_PREVIEW_ZOOM_ENHANCEMENT.md" />
-    <None Include="oldfiles\PDF_SIGNATURE_PREVIEW_FEATURE.md" />
-    <None Include="oldfiles\PIN_DIALOG_FIX.md" />
-    <None Include="oldfiles\PLF_FORMAT_UPDATE.md" />
-    <None Include="oldfiles\PLF_LOG_FORMAT.md" />
-    <None Include="oldfiles\PLF_LOG_TIMING_FIX.md" />
-    <None Include="oldfiles\PROMPT_TROUBLESHOOTING.md" />
-    <None Include="oldfiles\RunAdminKeyTester.bat" />
-    <None Include="oldfiles\SECURITY_FIX_ADMIN_LOGGING.md" />
-    <None Include="oldfiles\SETTINGS_DIALOG_FEATURE.md" />
-    <None Include="oldfiles\SETTINGS_FEATURE_SUMMARY.md" />
-    <None Include="oldfiles\SETTINGS_MODE_FEATURE.md" />
-    <None Include="oldfiles\SETTINGS_MODE_QUICK_REFERENCE.md" />
-    <None Include="oldfiles\SETTINGS_UI_FIXES.md" />
-    <None Include="oldfiles\TestAdminLicense.bat" />
-    <None Include="oldfiles\TestAdminPrompt.bat" />
-    <None Include="oldfiles\TROUBLESHOOTING_LICENSE_WARNING.md" />
-    <None Include="oldfiles\UNICODE_CHARACTERS_FIX.md" />
-    <None Include="oldfiles\UNIFIED_ADMIN_PANEL.md" />
-    <None Include="oldfiles\VERBOSE_MODE.md" />
-    <None Include="oldfiles\VERBOSE_MODE_FIX.md" />
-    <None Include="oldfiles\VERBOSE_MODE_QUICK_REFERENCE.md" />
-    <None Include="oldfiles\VERBOSE_MODE_SETTING.md" />
-    <None Include="oldfiles\VERBOSE_MODE_TROUBLESHOOTING.md" />
-    <None Include="oldfiles\VERSION_SYSTEM_DOCUMENTATION.md" />
-  </ItemGroup>
+
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
       <Visible>False</Visible>
@@ -232,20 +114,5 @@
       <Install>false</Install>
     </BootstrapperPackage>
   </ItemGroup>
-  <ItemGroup>
-    <Content Include="DigiSign_Admin.vbs" />
-    <Content Include="license.txt" />
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="packages\SkiaSharp.NativeAssets.macOS.3.119.1\build\net462\SkiaSharp.NativeAssets.macOS.targets" Condition="Exists('packages\SkiaSharp.NativeAssets.macOS.3.119.1\build\net462\SkiaSharp.NativeAssets.macOS.targets')" />
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('packages\SkiaSharp.NativeAssets.macOS.3.119.1\build\net462\SkiaSharp.NativeAssets.macOS.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\SkiaSharp.NativeAssets.macOS.3.119.1\build\net462\SkiaSharp.NativeAssets.macOS.targets'))" />
-    <Error Condition="!Exists('packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets'))" />
-    <Error Condition="!Exists('packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets'))" />
-  </Target>
-  <Import Project="packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets" Condition="Exists('packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets')" />
-  <Import Project="packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets" Condition="Exists('packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets')" />
+
 </Project>

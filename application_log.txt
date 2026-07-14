@@ -1,52 +1,45 @@
 ═══════════════════════════════════════════════════════════
-DigiSign Application Log - Session Started: 2026-02-19 15:06:08
-Application Path: D:\Development\DigiSign\
-Machine: VINOD-PC | User: vinod
+DigiSign Application Log - Session Started: 2026-07-13 15:26:39
+Application Path: C:\Users\homie\Repos\DigiSign\
+Machine: SKYNET | User: homie
 OS: Microsoft Windows NT 6.2.9200.0 | .NET: 4.0.30319.42000
 ═══════════════════════════════════════════════════════════
 
-2026-02-19 15:06:08 | INFO     | Logger initialized successfully
-2026-02-19 15:06:08 | INFO     | Application started
-2026-02-19 15:06:08 | DEBUG    | Command line arguments: /admin
-2026-02-19 15:06:08 | DEBUG    | License file path: D:\Development\DigiSign\license.txt
-2026-02-19 15:06:08 | DEBUG    | XML configuration file path: D:\Development\DigiSign\IP.xml
-2026-02-19 15:06:08 | DEBUG    | Reading XML configuration from: D:\Development\DigiSign\IP.xml
-2026-02-19 15:06:08 | DEBUG    | Input files found in XML: 1
-2026-02-19 15:06:08 | INFO     | XML configuration loaded successfully
+2026-07-13 15:26:39 | INFO     | Logger initialized successfully
+2026-07-13 15:26:39 | INFO     | Application started
+2026-07-13 15:26:39 | DEBUG    | Command line arguments: /admin
+2026-07-13 15:26:39 | DEBUG    | License file path: C:\Users\homie\Repos\DigiSign\license.txt
+2026-07-13 15:26:39 | DEBUG    | XML configuration file path: C:\Users\homie\Repos\DigiSign\IP.xml
+2026-07-13 15:26:39 | DEBUG    | Reading XML configuration from: C:\Users\homie\Repos\DigiSign\IP.xml
+2026-07-13 15:26:39 | DEBUG    | Input files found in XML: 1
+2026-07-13 15:26:39 | INFO     | XML configuration loaded successfully
 --------------------------------------------------------------------------------
-2026-02-19 15:06:08 | INFO     | Starting license validation
-2026-02-19 15:06:08 | INFO     | License file found at: D:\Development\DigiSign\license.txt
-2026-02-19 15:06:08 | DEBUG    | Starting license validation
-2026-02-19 15:06:08 | DEBUG    | License Number: 123456789
-2026-02-19 15:06:08 | DEBUG    | Valid Until: 2027-01-30
-2026-02-19 15:06:08 | DEBUG    | Stored Device ID: BFEBFBFF000906A4_AA000000000000001631
-2026-02-19 15:06:09 | DEBUG    | Current Device ID: BFEBFBFF000906A4_[
-2026-02-19 15:06:09 | WARNING  | Device mismatch - license is for a different device
-2026-02-19 15:06:09 | WARNING  | License validation failed - Demo Mode enabled
-2026-02-19 15:06:09 | INFO     | License key file already exists at: D:\Development\DigiSign\license.key
-2026-02-19 15:06:09 | INFO     | Application mode: DEMO
+2026-07-13 15:26:39 | INFO     | Starting license validation
+2026-07-13 15:26:39 | INFO     | License file not found - Demo Mode enabled
+2026-07-13 15:26:39 | INFO     | License key file already exists at: C:\Users\homie\Repos\DigiSign\license.key
+2026-07-13 15:26:39 | INFO     | Application mode: DEMO
 --------------------------------------------------------------------------------
-2026-02-19 15:06:09 | INFO     | Admin mode requested
-2026-02-19 15:06:09 | INFO     | Admin license validated successfully
-2026-02-19 15:06:09 | INFO     | Admin license validated - entering license generation mode
-2026-02-19 15:06:09 | DEBUG    | Showing License Generation Form
-2026-02-19 15:06:09 | DEBUG    | Creating LicenseGenerationForm instance
-2026-02-19 15:06:09 | DEBUG    | Showing form dialog
-2026-02-19 15:06:34 | DEBUG    | Dialog result: OK
-2026-02-19 15:06:34 | INFO     | User completed the license generation form
-2026-02-19 15:06:34 | DEBUG    | User input received from form
-2026-02-19 15:06:34 | DEBUG    |   License Key Path: F:\PearlESign\license.key
-2026-02-19 15:06:34 | DEBUG    |   Customer ID: VINOD-PC
-2026-02-19 15:06:34 | DEBUG    |   License Number: VINOD-PC
-2026-02-19 15:06:34 | DEBUG    |   Expiration Date: 2027-02-19
-2026-02-19 15:06:34 | INFO     | Generating license from form data
-2026-02-19 15:06:34 | INFO     |   License key file: F:\PearlESign\license.key
-2026-02-19 15:06:34 | DEBUG    | Device ID from key: BFEBFBFF000906A4_AA000000000000001631
-2026-02-19 15:06:34 | DEBUG    | Customer ID: VINOD-PC
-2026-02-19 15:06:34 | DEBUG    | License Number: VINOD-PC
-2026-02-19 15:06:34 | DEBUG    | Valid Until: 2027-02-19
-2026-02-19 15:06:34 | DEBUG    | Generated Device Hash: B3CC1871574FA5EC902C617895F3F25A968BF01C0FD58CA21E1DD3041FE326F8
-2026-02-19 15:06:34 | INFO     | License file generated successfully: F:\PearlESign\license.txt
-2026-02-19 15:06:34 | INFO     | License file generated successfully from: F:\PearlESign\license.key
-2026-02-19 15:06:34 | INFO     | Exiting admin mode (no PDF processing)
-2026-02-19 15:06:34 | INFO     | Application ended
+2026-07-13 15:26:39 | INFO     | Admin mode requested
+2026-07-13 15:26:39 | INFO     | Admin license validated successfully
+2026-07-13 15:26:39 | INFO     | Admin license validated - entering license generation mode
+2026-07-13 15:26:39 | DEBUG    | Showing License Generation Form
+2026-07-13 15:26:39 | DEBUG    | Creating LicenseGenerationForm instance
+2026-07-13 15:26:39 | DEBUG    | Showing form dialog
+2026-07-13 15:27:00 | DEBUG    | Dialog result: OK
+2026-07-13 15:27:00 | INFO     | User completed the license generation form
+2026-07-13 15:27:00 | DEBUG    | User input received from form
+2026-07-13 15:27:00 | DEBUG    |   License Key Path: C:\Users\homie\Repos\DigiSign\license.key
+2026-07-13 15:27:00 | DEBUG    |   Customer ID: skynet
+2026-07-13 15:27:00 | DEBUG    |   License Number: 1
+2026-07-13 15:27:00 | DEBUG    |   Expiration Date: 2027-07-13
+2026-07-13 15:27:00 | INFO     | Generating license from form data
+2026-07-13 15:27:00 | INFO     |   License key file: C:\Users\homie\Repos\DigiSign\license.key
+2026-07-13 15:27:00 | DEBUG    | Device ID from key: BFEBFBFF000706E5_6479_A775_6000_007B.
+2026-07-13 15:27:00 | DEBUG    | Customer ID: skynet
+2026-07-13 15:27:00 | DEBUG    | License Number: 1
+2026-07-13 15:27:00 | DEBUG    | Valid Until: 2027-07-13
+2026-07-13 15:27:00 | DEBUG    | Generated Device Hash: 9AB6CA6A2D4E2343A28324A5DC1C77FCC72268220B2806DC66B9780B10FDB33E
+2026-07-13 15:27:00 | INFO     | License file generated successfully: C:\Users\homie\Repos\DigiSign\license.txt
+2026-07-13 15:27:00 | INFO     | License file generated successfully from: C:\Users\homie\Repos\DigiSign\license.key
+2026-07-13 15:27:00 | INFO     | Exiting admin mode (no PDF processing)
+2026-07-13 15:27:00 | INFO     | Application ended

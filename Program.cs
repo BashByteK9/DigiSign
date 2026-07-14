@@ -30,6 +30,9 @@ namespace DigiSign
         public bool VerboseMode { get; set; } = false;
         public string SelfSignedPath { get; set; }
         public string SelfSignedPassword { get; set; }
+        public int Port { get; set; } = 8943;
+        public string InvoiceApiBaseUrl { get; set; }
+        public string InvoiceApiKey { get; set; }
 
     }
 
@@ -62,13 +65,14 @@ namespace DigiSign
             // Check if admin mode or settings mode is requested FIRST (before verbose mode check)
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
             bool isSettingsMode = args.Length > 0 && args[0].Equals("/settings", StringComparison.OrdinalIgnoreCase);
-            
+            bool isListenMode = args.Length > 0 && args[0].Equals("/listen", StringComparison.OrdinalIgnoreCase);
+
             // Read XML data first to check verbose mode setting
             var xmlData = ReadXmlData(xmlFilePath);
-            
-            // Only enable verbose mode if NOT in admin mode or settings mode
-            // Admin mode and settings mode are for configuration only, not PDF signing
-            if (!isAdminMode && !isSettingsMode)
+
+            // Only enable verbose mode if NOT in admin mode, settings mode, or listen mode
+            // Admin mode, settings mode, and listen mode are not the batch PDF-signing flow
+            if (!isAdminMode && !isSettingsMode && !isListenMode)
             {
                 // Check for verbose mode from command line OR from XML settings
                 bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
@@ -120,12 +124,14 @@ namespace DigiSign
             }
             else
             {
-                // Admin mode or settings mode - verbose mode is not applicable
+                // Admin mode, settings mode, or listen mode - verbose mode is not applicable
                 if (isAdminMode)
                     Logger.Info("Admin mode - verbose mode disabled");
-                else
+                else if (isSettingsMode)
                     Logger.Info("Settings mode - verbose mode disabled");
-                    
+                else
+                    Logger.Info("Listen mode - verbose mode disabled");
+
                 isVerboseMode = false;
                 shouldAutoClose = false;
             }
@@ -306,9 +312,15 @@ namespace DigiSign
                 Logger.Info("Admin license detected but not running in admin mode");
             }
 
+            if (isListenMode)
+            {
+                RunListenMode(xmlData);
+                return;
+            }
+
             Logger.LogSeparator();
             Logger.Info("Starting PDF processing");
-            
+
             if (isVerboseMode)
             {
                 verboseForm.UpdateProgress(4, "Validating XML configuration...");
@@ -713,6 +725,68 @@ namespace DigiSign
             Logger.Info("Application ended");
         }
 
+        static void RunListenMode(XmlData xmlData)
+        {
+            Logger.LogSeparator();
+            Logger.Info("Listen mode requested - starting HTTP listener tray application");
+
+            if (xmlData == null || string.IsNullOrEmpty(xmlData.CommonName) || string.IsNullOrEmpty(xmlData.OutputFolderPath))
+            {
+                Logger.Error("Cannot start listen mode - IP.xml configuration invalid/missing (CommonName/OutputFolderPath required)");
+                MessageBox.Show(
+                    "Cannot start the listener: PDF signing settings are not configured.\n\nRun 'DigiSign.exe /settings' first.",
+                    "DigiSign Listener",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            int port = xmlData.Port > 0 ? xmlData.Port : 8943;
+            var downloader = new PlaceholderInvoiceDownloader(xmlData.InvoiceApiBaseUrl, xmlData.InvoiceApiKey);
+            var listenerService = new HttpListenerService(port, xmlData, downloader);
+
+            try
+            {
+                listenerService.Start();
+            }
+            catch (Exception ex)
+            {
+                Logger.Critical($"Failed to start HTTP listener on port {port}", ex);
+                MessageBox.Show(
+                    $"Failed to start listener on port {port}:\n{ex.Message}",
+                    "DigiSign Listener",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            using (var trayIcon = new NotifyIcon())
+            {
+                var menu = new ContextMenuStrip();
+                menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                {
+                    try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
+                    catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
+                });
+                menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+
+                trayIcon.Icon = SystemIcons.Application;
+                trayIcon.Text = $"DigiSign Listener (port {port})";
+                trayIcon.ContextMenuStrip = menu;
+                trayIcon.Visible = true;
+
+                Application.ApplicationExit += (s, e) => listenerService.Stop();
+
+                Logger.Info($"Listener running on http://localhost:{port}/ - waiting for requests");
+                Application.Run();
+            }
+
+            listenerService.Dispose();
+            Logger.Info("Listen mode exited");
+        }
+
         static void RunSettingsMode()
         {
             // Settings mode - no license required
@@ -856,6 +930,26 @@ namespace DigiSign
                     string verboseFlag = fileNameLists[11].Element("FILENAME")?.Value.Trim().ToUpper();
                     xmlData.VerboseMode = (verboseFlag == "Y");
                     Logger.Debug($"VerboseMode from XML: {xmlData.VerboseMode}");
+                }
+
+                // Optional index 12: Listener Port (used by '/listen' mode)
+                if (fileNameLists.Count > 12)
+                {
+                    int.TryParse(fileNameLists[12].Element("FILENAME")?.Value?.Trim(), out int port);
+                    xmlData.Port = port > 0 ? port : 8943;
+                    Logger.Debug($"Listener Port from XML: {xmlData.Port}");
+                }
+
+                // Optional index 13: Invoice/Label download API base URL (placeholder, '/listen' mode)
+                if (fileNameLists.Count > 13)
+                {
+                    xmlData.InvoiceApiBaseUrl = fileNameLists[13].Element("FILENAME")?.Value?.Trim();
+                }
+
+                // Optional index 14: Invoice/Label download API key (placeholder, '/listen' mode)
+                if (fileNameLists.Count > 14)
+                {
+                    xmlData.InvoiceApiKey = fileNameLists[14].Element("FILENAME")?.Value?.Trim();
                 }
 
                 Logger.Info("XML configuration loaded successfully");
