@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"/c/Users/homie/Build/Digisign\" && ls -la appsettings.json IP.xml 2>&1 *)",
+      "Read(//c/Users/homie/Build/Digisign/**)",
+      "Bash(cp appsettings.json appsettings.json.bak)",
+      "Bash(cp IP.xml IP.xml.bak)",
+      "Bash(rm -f appsettings.json)",
+      "Bash(python3 -c ' *)",
+      "Bash(./DigiSign.exe //settings)",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(tasklist //FI \"IMAGENAME eq DigiSign.exe\")",
+      "Bash(taskkill //F //IM DigiSign.exe)",
+      "Bash(cd \"/c/Users/homie/Build/Digisign\" && grep -c \"FILENAMELIST>\" IP.xml *)",
+      "Bash(cd \"/c/Users/homie/Build/Digisign\" && cat appsettings.json)"
+    ]
+  }
+}

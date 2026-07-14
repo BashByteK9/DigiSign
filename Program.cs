@@ -27,13 +27,8 @@ namespace DigiSign
         public string SignOnPage { get; set; } // F=First, E=Each, L=Last
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
         public bool UseSelfSigned { get; set; } = false;
-        public bool VerboseMode { get; set; } = false;
         public string SelfSignedPath { get; set; }
         public string SelfSignedPassword { get; set; }
-        public int Port { get; set; } = 8943;
-        public string InvoiceApiBaseUrl { get; set; }
-        public string InvoiceApiKey { get; set; }
-        public bool LaunchInBatchMode { get; set; } = false;
 
     }
 
@@ -67,13 +62,14 @@ namespace DigiSign
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
             bool isSettingsMode = args.Length > 0 && args[0].Equals("/settings", StringComparison.OrdinalIgnoreCase);
 
-            // Read XML data first to check verbose mode setting and the batch-mode toggle
+            // Read XML data (core signing fields) and appsettings.json (listener/API fields + toggles)
             var xmlData = ReadXmlData(xmlFilePath);
+            var appSettings = AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath);
 
             // No args: default to listener/tray mode unless the "launch in batch mode" toggle is set.
             // Explicit "/listen" always forces listener mode regardless of the toggle.
             bool isListenMode = args.Length == 0
-                ? !(xmlData?.LaunchInBatchMode ?? false)
+                ? !appSettings.LaunchInBatchMode
                 : args[0].Equals("/listen", StringComparison.OrdinalIgnoreCase);
 
             // Only enable verbose mode if NOT in admin mode, settings mode, or listen mode
@@ -82,7 +78,7 @@ namespace DigiSign
             {
                 // Check for verbose mode from command line OR from XML settings
                 bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
-                bool xmlVerbose = xmlData?.VerboseMode ?? false;
+                bool xmlVerbose = appSettings.VerboseMode;
                 isVerboseMode = cmdLineVerbose || xmlVerbose;
                 shouldAutoClose = isVerboseMode;
 
@@ -195,7 +191,7 @@ namespace DigiSign
             // license is checked per-request inside the listener instead of gating startup.
             if (isListenMode)
             {
-                RunListenMode(xmlData, licensePath);
+                RunListenMode(xmlData, appSettings, licensePath);
                 return;
             }
 
@@ -411,107 +407,30 @@ namespace DigiSign
                         Application.DoEvents();
                     }
 
-                    Logger.Info($"Loading certificate: {commonName}");
+                    // Create signature configuration
+                    var signatureConfig = new SignatureConfiguration(xCoord, yCoord, width, height, signOnPage);
+                    IBatchSignProgress progress = isVerboseMode ? new VerboseBatchSignProgress(verboseForm) : null;
 
-                    // Use DigitalSignatureService for all signing operations
-                    var signatureService = new DigitalSignatureService();
-                    var cert = signatureService.LoadCertificate(commonName, pin, xmlData);
+                    var result = BatchSigner.SignFiles(validPdfFiles, outputFolderPath, commonName, pin, signatureConfig, xmlData, progress);
 
-                    if (cert != null)
+                    if (result.CertificateError != null)
                     {
-                        Logger.Info("Certificate loaded successfully");
-                        Logger.Debug($"Certificate Subject: {cert.Subject}");
-                        Logger.Debug($"Certificate Thumbprint: {cert.Thumbprint}");
-                        Logger.Debug($"Certificate Expiry: {cert.NotAfter:yyyy-MM-dd}");
-
-                        if (isVerboseMode)
-                        {
-                            VerboseLog("Certificate loaded", VerboseLogType.Success);
-                            VerboseLog($"Subject: {cert.Subject}", VerboseLogType.Detail);
-                            VerboseLog($"Expiry: {cert.NotAfter:yyyy-MM-dd}", VerboseLogType.Detail);
-                            verboseForm.AppendText("\n", Color.Black);
-                            verboseForm.UpdateProgress(8, "Processing PDF files...");
-                            verboseForm.AppendText("\n", Color.Black);
-                            Application.DoEvents();
-                        }
-
-                        // Create signature configuration
-                        var signatureConfig = new SignatureConfiguration(xCoord, yCoord, width, height, signOnPage);
-
-                        // Process each PDF file
-                        int successCount = 0;
-                        int failCount = 0;
-                        List<string> successfulFiles = new List<string>(); // Track successful files
-                        
-                        for (int i = 0; i < validPdfFiles.Count; i++)
-                        {
-                            string inputPdfPath = validPdfFiles[i];
-                            
-                            Logger.LogSeparator();
-                            Logger.Info($"Processing PDF: {Path.GetFileName(inputPdfPath)}");
-                            
-                            if (isVerboseMode)
-                            {
-                                verboseForm.AppendText($"\n    PDF {i + 1}/{validPdfFiles.Count}: {Path.GetFileName(inputPdfPath)}\n", Color.FromArgb(0, 102, 204), true);
-                                Application.DoEvents();
-                            }
-                            
-                            string inputFileName = Path.GetFileName(inputPdfPath);
-                            string outputFileName = $"{inputFileName}";
-                            string outputPdfPath = Path.Combine(outputFolderPath, outputFileName);
-
-                            try
-                            {
-                                //signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath, isVerboseMode, verboseForm);
-                                signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolderPath);
-                                successCount++;
-                                successfulFiles.Add(outputFileName); // Track successful file
-                                Logger.Info($"Successfully signed: {inputFileName}");
-                                
-                                if (isVerboseMode)
-                                {
-                                    VerboseLog("SUCCESS", VerboseLogType.Success);
-                                    VerboseLog($"Output: {outputFileName}", VerboseLogType.Detail);
-                                    verboseForm.AppendText("\n", Color.Black);
-                                    Application.DoEvents();
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                failCount++;
-                                Logger.Error($"Failed to sign: {inputFileName}", ex);
-                                
-                                if (isVerboseMode)
-                                {
-                                    VerboseLog("FAILED", VerboseLogType.Error);
-                                    VerboseLog($"Error: {ex.Message}", VerboseLogType.Detail);
-                                    verboseForm.AppendText("\n", Color.Black);
-                                    Application.DoEvents();
-                                }
-                            }
-                        }
-
-                        Logger.LogSeparator();
-                        Logger.Info($"PDF signing completed - Success: {successCount}, Failed: {failCount}");
-                        
+                        Logger.Error(result.CertificateError);
+                        Logger.LogToPlf(result.CertificateError, isError: true);
+                        totalErrorCount++; // Count certificate not found error
+                    }
+                    else
+                    {
                         // Store success info for PLF logging later (after verbose dialog closes)
-                        hasSuccessfulSigning = successCount > 0;
-                        if (successCount >= 1)
+                        hasSuccessfulSigning = result.SuccessCount > 0;
+                        if (result.SuccessCount >= 1)
                         {
-                            plfSuccessMessage = $"File(s) Signed Successfully - {successfulFiles[0]}";
+                            var firstSuccess = result.FileResults.First(r => r.Success);
+                            plfSuccessMessage = $"File(s) Signed Successfully - {firstSuccess.FileName}";
                         }
-                        
+
                         // Add PDF signing failures to total error count
-                        totalErrorCount += failCount;
-                        
-                        if (isVerboseMode)
-                        {
-                            verboseForm.UpdateProgress(9, "Processing complete");
-                            verboseForm.AppendText("\n", Color.Black);
-                            verboseForm.ShowSummary(successCount, failCount);
-                            verboseForm.AppendText("\n", Color.Black);
-                            Application.DoEvents();
-                        }
+                        totalErrorCount += result.FailCount;
 
                         // Open output folder if specified
                         if (openOutputFolder.Equals("Y", StringComparison.OrdinalIgnoreCase))
@@ -519,17 +438,17 @@ namespace DigiSign
                             try
                             {
                                 Logger.Debug($"Opening output folder: {outputFolderPath}");
-                                
+
                                 if (isVerboseMode)
                                 {
                                     verboseForm.UpdateProgress(10, "Opening output folder...");
                                     VerboseLog(outputFolderPath, VerboseLogType.Detail);
                                     Application.DoEvents();
                                 }
-                                
+
                                 Process.Start("explorer.exe", outputFolderPath);
                                 Logger.Info("Output folder opened successfully");
-                                
+
                                 if (isVerboseMode)
                                 {
                                     VerboseLog("Folder opened", VerboseLogType.Success);
@@ -549,18 +468,6 @@ namespace DigiSign
                         else if (isVerboseMode)
                         {
                             verboseForm.UpdateProgress(10, "Skipping folder open (OpenOutputFolder=N)");
-                            Application.DoEvents();
-                        }
-                    }
-                    else
-                    {
-                        Logger.Error($"Certificate not found: {commonName}");
-                        Logger.LogToPlf($"Certificate not found: {commonName}", isError: true);
-                        totalErrorCount++; // Count certificate not found error
-                        
-                        if (isVerboseMode)
-                        {
-                            VerboseLog($"Certificate not found: {commonName}", VerboseLogType.Error);
                             Application.DoEvents();
                         }
                     }
@@ -733,7 +640,7 @@ namespace DigiSign
             Logger.Info("Application ended");
         }
 
-        static void RunListenMode(XmlData xmlData, string licensePath)
+        static void RunListenMode(XmlData xmlData, AppSettings appSettings, string licensePath)
         {
             Logger.LogSeparator();
             Logger.Info("Listen mode requested - starting HTTP listener tray application");
@@ -749,8 +656,8 @@ namespace DigiSign
                 return;
             }
 
-            int port = xmlData.Port > 0 ? xmlData.Port : 8943;
-            var downloader = new PlaceholderInvoiceDownloader(xmlData.InvoiceApiBaseUrl, xmlData.InvoiceApiKey);
+            int port = appSettings.Port > 0 ? appSettings.Port : 8943;
+            var downloader = new HttpDocumentSetDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey);
 
             using (var hostForm = new TrayHostForm())
             {
@@ -943,42 +850,6 @@ namespace DigiSign
                     xmlData.UseSelfSigned = (flag == "Y");
                 }
                 
-                // Optional index 11: VerboseMode flag
-                if (fileNameLists.Count > 11)
-                {
-                    string verboseFlag = fileNameLists[11].Element("FILENAME")?.Value.Trim().ToUpper();
-                    xmlData.VerboseMode = (verboseFlag == "Y");
-                    Logger.Debug($"VerboseMode from XML: {xmlData.VerboseMode}");
-                }
-
-                // Optional index 12: Listener Port (used by '/listen' mode)
-                if (fileNameLists.Count > 12)
-                {
-                    int.TryParse(fileNameLists[12].Element("FILENAME")?.Value?.Trim(), out int port);
-                    xmlData.Port = port > 0 ? port : 8943;
-                    Logger.Debug($"Listener Port from XML: {xmlData.Port}");
-                }
-
-                // Optional index 13: Invoice/Label download API base URL (placeholder, '/listen' mode)
-                if (fileNameLists.Count > 13)
-                {
-                    xmlData.InvoiceApiBaseUrl = fileNameLists[13].Element("FILENAME")?.Value?.Trim();
-                }
-
-                // Optional index 14: Invoice/Label download API key (placeholder, '/listen' mode)
-                if (fileNameLists.Count > 14)
-                {
-                    xmlData.InvoiceApiKey = fileNameLists[14].Element("FILENAME")?.Value?.Trim();
-                }
-
-                // Optional index 15: LaunchInBatchMode flag (default N = launch to listener/tray)
-                if (fileNameLists.Count > 15)
-                {
-                    string batchFlag = fileNameLists[15].Element("FILENAME")?.Value?.Trim().ToUpper();
-                    xmlData.LaunchInBatchMode = (batchFlag == "Y");
-                    Logger.Debug($"LaunchInBatchMode from XML: {xmlData.LaunchInBatchMode}");
-                }
-
                 Logger.Info("XML configuration loaded successfully");
                 return xmlData;
             }

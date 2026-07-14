@@ -137,7 +137,8 @@ namespace DigiSign
             settingsOnlyMode = settingsOnly;
             xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
             InitializeComponents();
-            LoadSettings();
+            LoadSigningSettings();
+            LoadApiSettings();
             WasCancelled = true; // Default to cancelled unless user clicks Generate
         }
 
@@ -552,6 +553,29 @@ namespace DigiSign
             };
             chkShowApiKey.CheckedChanged += ChkShowApiKey_CheckedChanged;
             tabApiSettings.Controls.Add(chkShowApiKey);
+            currentY += 30;
+
+            // Verbose Mode
+            chkVerboseMode = new CheckBox
+            {
+                Text = "Enable Verbose Mode (detailed signing logs)",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                ForeColor = Color.FromArgb(0, 102, 204)
+            };
+            tabApiSettings.Controls.Add(chkVerboseMode);
+            currentY += 30;
+
+            // Batch Mode toggle
+            chkBatchMode = new CheckBox
+            {
+                Text = "Launch in batch signing mode (instead of listener/tray) when started with no arguments",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabApiSettings.Controls.Add(chkBatchMode);
         }
 
         private void CreateGeneralSettingsTab()
@@ -683,29 +707,6 @@ namespace DigiSign
             };
             chkShowPin.CheckedChanged += ChkShowPin_CheckedChanged;
             tabGeneral.Controls.Add(chkShowPin);
-            currentY += 30;
-            
-            // Verbose Mode
-            chkVerboseMode = new CheckBox
-            {
-                Text = "Enable Verbose Mode (detailed signing logs)",
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(660, 20),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                ForeColor = Color.FromArgb(0, 102, 204)
-            };
-            tabGeneral.Controls.Add(chkVerboseMode);
-            currentY += 30;
-
-            // Batch Mode toggle
-            chkBatchMode = new CheckBox
-            {
-                Text = "Launch in batch signing mode (instead of listener/tray) when started with no arguments",
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(660, 20),
-                Font = new Font("Segoe UI", 9)
-            };
-            tabGeneral.Controls.Add(chkBatchMode);
         }
         
         private void CreateSignatureSettingsTab()
@@ -1104,48 +1105,48 @@ namespace DigiSign
             txtInvoiceApiKey.PasswordChar = chkShowApiKey.Checked ? '\0' : '*';
         }
 
-        private void LoadSettings()
+        private void LoadSigningSettings()
         {
             try
             {
                 if (!File.Exists(xmlFilePath))
                 {
-                    LoadDefaultSettings();
+                    LoadDefaultSigningSettings();
                     return;
                 }
-                
+
                 var xmlDoc = XDocument.Load(xmlFilePath);
                 var envelope = xmlDoc.Element("ENVELOPE");
                 if (envelope == null)
                 {
-                    LoadDefaultSettings();
+                    LoadDefaultSigningSettings();
                     return;
                 }
-                
+
                 var fileNameLists = envelope.Element("FILENAMELIST")?.Elements("FILENAMELIST").ToList();
                 if (fileNameLists == null || fileNameLists.Count < 10)
                 {
-                    LoadDefaultSettings();
+                    LoadDefaultSigningSettings();
                     return;
                 }
-                
+
                 // Load values
                 txtInputFile.Text = fileNameLists[0].Element("FILENAME")?.Value ?? "";
                 txtOutputFolder.Text = fileNameLists[1].Element("FILENAME")?.Value ?? "";
                 txtCommonName.Text = fileNameLists[2].Element("FILENAME")?.Value ?? "";
                 txtPin.Text = fileNameLists[3].Element("FILENAME")?.Value ?? "";
-                
+
                 numXCoord.Value = decimal.Parse(fileNameLists[4].Element("FILENAME")?.Value ?? "400");
                 numYCoord.Value = decimal.Parse(fileNameLists[5].Element("FILENAME")?.Value ?? "75");
                 numWidth.Value = decimal.Parse(fileNameLists[6].Element("FILENAME")?.Value ?? "150");
                 numHeight.Value = decimal.Parse(fileNameLists[7].Element("FILENAME")?.Value ?? "50");
-                
+
                 string signOnPage = fileNameLists[8].Element("FILENAME")?.Value ?? "L";
                 cmbSignOnPage.SelectedIndex = signOnPage == "F" ? 0 : signOnPage == "E" ? 1 : 2;
-                
+
                 string openFolder = fileNameLists[9].Element("FILENAME")?.Value ?? "Y";
                 cmbOpenOutputFolder.SelectedIndex = openFolder == "Y" ? 0 : 1;
-                
+
                 if (fileNameLists.Count > 10)
                 {
                     string useSelfSigned = fileNameLists[10].Element("FILENAME")?.Value ?? "N";
@@ -1155,58 +1156,28 @@ namespace DigiSign
                 {
                     cmbUseSelfSigned.SelectedIndex = 1;
                 }
-                
-                // Load verbose mode setting (index 11)
-                if (fileNameLists.Count > 11)
-                {
-                    string verboseMode = fileNameLists[11].Element("FILENAME")?.Value ?? "N";
-                    chkVerboseMode.Checked = verboseMode.ToUpper() == "Y";
-                }
-                else
-                {
-                    chkVerboseMode.Checked = false; // Default to not verbose
-                }
-
-                // Load listener port (index 12)
-                if (fileNameLists.Count > 12 &&
-                    int.TryParse(fileNameLists[12].Element("FILENAME")?.Value, out int listenerPort) &&
-                    listenerPort >= 1024 && listenerPort <= 65535)
-                {
-                    numListenerPort.Value = listenerPort;
-                }
-                else
-                {
-                    numListenerPort.Value = 8943;
-                }
-
-                // Load invoice/label API base URL (index 13)
-                txtInvoiceApiBaseUrl.Text = fileNameLists.Count > 13
-                    ? fileNameLists[13].Element("FILENAME")?.Value ?? ""
-                    : "";
-
-                // Load invoice/label API key (index 14)
-                txtInvoiceApiKey.Text = fileNameLists.Count > 14
-                    ? fileNameLists[14].Element("FILENAME")?.Value ?? ""
-                    : "";
-
-                // Load batch mode toggle (index 15)
-                if (fileNameLists.Count > 15)
-                {
-                    string batchMode = fileNameLists[15].Element("FILENAME")?.Value ?? "N";
-                    chkBatchMode.Checked = batchMode.ToUpper() == "Y";
-                }
-                else
-                {
-                    chkBatchMode.Checked = false;
-                }
             }
             catch (Exception)
             {
-                LoadDefaultSettings();
+                LoadDefaultSigningSettings();
             }
         }
 
-        private void LoadDefaultSettings()
+        private void LoadApiSettings()
+        {
+            var settings = AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath);
+
+            chkVerboseMode.Checked = settings.VerboseMode;
+
+            int port = settings.Port;
+            numListenerPort.Value = port >= 1024 && port <= 65535 ? port : 8943;
+
+            txtInvoiceApiBaseUrl.Text = settings.InvoiceApiBaseUrl ?? "";
+            txtInvoiceApiKey.Text = settings.InvoiceApiKey ?? "";
+            chkBatchMode.Checked = settings.LaunchInBatchMode;
+        }
+
+        private void LoadDefaultSigningSettings()
         {
             txtInputFile.Text = "";
             txtOutputFolder.Text = @"C:\Users\Public";
@@ -1219,6 +1190,10 @@ namespace DigiSign
             cmbSignOnPage.SelectedIndex = 2;
             cmbOpenOutputFolder.SelectedIndex = 0;
             cmbUseSelfSigned.SelectedIndex = 1;
+        }
+
+        private void LoadDefaultApiSettings()
+        {
             chkVerboseMode.Checked = false; // Default to not verbose
             numListenerPort.Value = 8943;
             txtInvoiceApiBaseUrl.Text = "";
@@ -1282,33 +1257,22 @@ namespace DigiSign
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", cmbUseSelfSigned.SelectedIndex == 0 ? "Y" : "N"),
                                 new XComment(" USESELFSIGNED ")
-                            ),
-                            new XElement("FILENAMELIST",
-                                new XElement("FILENAME", chkVerboseMode.Checked ? "Y" : "N"),
-                                new XComment(" VerboseMode: Y=Enable detailed signing logs, N=Normal mode, default value=N ")
-                            ),
-                            new XElement("FILENAMELIST",
-                                new XElement("FILENAME", numListenerPort.Value.ToString("0")),
-                                new XComment(" Listener Port: TCP port used by 'DigiSign.exe /listen' mode, default 8943 ")
-                            ),
-                            new XElement("FILENAMELIST",
-                                new XElement("FILENAME", txtInvoiceApiBaseUrl.Text),
-                                new XComment(" Invoice/Label download API base URL (placeholder, used by '/listen' mode) ")
-                            ),
-                            new XElement("FILENAMELIST",
-                                new XElement("FILENAME", txtInvoiceApiKey.Text),
-                                new XComment(" Invoice/Label download API key (placeholder, used by '/listen' mode) ")
-                            ),
-                            new XElement("FILENAMELIST",
-                                new XElement("FILENAME", chkBatchMode.Checked ? "Y" : "N"),
-                                new XComment(" LaunchInBatchMode: Y=no-args launch runs batch PDF signing, N=no-args launch opens listener/tray, default value=N ")
                             )
                         )
                     )
                 );
-                
+
                 xmlDoc.Save(xmlFilePath);
-                
+
+                AppSettingsLoader.Save(new AppSettings
+                {
+                    VerboseMode = chkVerboseMode.Checked,
+                    Port = (int)numListenerPort.Value,
+                    InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
+                    InvoiceApiKey = txtInvoiceApiKey.Text,
+                    LaunchInBatchMode = chkBatchMode.Checked
+                });
+
                 MessageBox.Show(
                     "Settings saved successfully!\n\nThe new settings will be used for PDF signing operations.",
                     "Settings Saved",
@@ -1338,7 +1302,8 @@ namespace DigiSign
             
             if (result == DialogResult.Yes)
             {
-                LoadDefaultSettings();
+                LoadDefaultSigningSettings();
+                LoadDefaultApiSettings();
             }
         }
 

@@ -62,12 +62,22 @@
   <ItemGroup>
     <Compile Remove="AdminKeyTester.cs" />
     <Compile Remove="AdminLicenseValidator.cs" />
+    <Compile Remove="MockDocumentServer\**\*.cs" />
+    <None Remove="MockDocumentServer\**" />
+    <EmbeddedResource Remove="MockDocumentServer\**" />
+    <Content Remove="MockDocumentServer\**" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="singer_icon.png">
       <LogicalName>DigiSign.singer_icon.png</LogicalName>
     </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
@@ -92,6 +102,7 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
     <PackageReference Include="iTextSharp" Version="5.5.13.4" />
     <PackageReference Include="Microsoft.Bcl.Cryptography" Version="9.0.9" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Pkcs11Interop" Version="5.3.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />

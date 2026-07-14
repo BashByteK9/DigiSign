@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,12 +10,11 @@ namespace DigiSign
 {
     public class HttpListenerService : IDisposable
     {
-        private static readonly Regex RoutePattern = new Regex(@"^/(invoice|label)/([^/]*)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex RoutePattern = new Regex(@"^/process/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly int port;
         private readonly XmlData xmlData;
-        private readonly IInvoiceDownloader downloader;
-        private readonly DigitalSignatureService signatureService;
+        private readonly IDocumentSetDownloader downloader;
         private readonly string licensePath;
         private readonly Action<string> onLicenseIssue;
 
@@ -22,12 +22,11 @@ namespace DigiSign
         private Thread listenThread;
         private volatile bool stopping;
 
-        public HttpListenerService(int port, XmlData xmlData, IInvoiceDownloader downloader, string licensePath, Action<string> onLicenseIssue)
+        public HttpListenerService(int port, XmlData xmlData, IDocumentSetDownloader downloader, string licensePath, Action<string> onLicenseIssue)
         {
             this.port = port;
             this.xmlData = xmlData;
             this.downloader = downloader;
-            this.signatureService = new DigitalSignatureService();
             this.licensePath = licensePath;
             this.onLicenseIssue = onLicenseIssue;
         }
@@ -94,7 +93,7 @@ namespace DigiSign
                 Logger.Error("Unhandled exception while processing HTTP request", ex);
                 try
                 {
-                    WriteJsonResponse(context, 500, false, null, "Internal server error");
+                    WriteJsonError(context, 500, null, "Internal server error");
                 }
                 catch
                 {
@@ -115,92 +114,145 @@ namespace DigiSign
             if (!match.Success)
             {
                 Logger.Warning($"Unrecognized route requested: {method} {path}");
-                WriteJsonResponse(context, 404, false, null, "Unknown route. Expected /invoice/{token} or /label/{token}.");
+                WriteJsonError(context, 404, null, "Unknown route. Expected /process/{token}.");
                 return;
             }
 
-            string token = match.Groups[2].Value;
-            if (string.IsNullOrWhiteSpace(token))
+            string token = match.Groups[1].Value;
+            if (!IsValidToken(token, out string reason))
             {
-                Logger.Warning($"Route matched but token is missing: {method} {path}");
-                WriteJsonResponse(context, 400, false, null, "Token is required.");
+                Logger.Warning($"Rejected request with invalid token: {reason}");
+                WriteJsonError(context, 400, token, reason);
                 return;
             }
 
-            DocumentType docType = match.Groups[1].Value.Equals("invoice", StringComparison.OrdinalIgnoreCase)
-                ? DocumentType.Invoice
-                : DocumentType.Label;
-
-            ProcessSignRequest(context, docType, token);
+            ProcessTokenRequest(context, token);
         }
 
-        private void ProcessSignRequest(HttpListenerContext context, DocumentType docType, string token)
+        private static bool IsValidToken(string token, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                reason = "Token is required.";
+                return false;
+            }
+
+            if (token.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || token.Contains("..") || token.Contains("/") || token.Contains("\\"))
+            {
+                reason = "Token contains invalid characters.";
+                return false;
+            }
+
+            reason = null;
+            return true;
+        }
+
+        private void ProcessTokenRequest(HttpListenerContext context, string token)
         {
             if (!LicenseManager.ValidateLicense(licensePath))
             {
-                string msg = $"Signing request for {docType}/{token} was rejected: no valid license is installed. Run 'DigiSign.exe /settings' or contact support for a license.";
+                string msg = $"Signing request for token '{token}' was rejected: no valid license is installed. Run 'DigiSign.exe /settings' or contact support for a license.";
                 Logger.Error(msg);
-                WriteJsonResponse(context, 403, false, null, "Valid license required for signing.");
+                WriteJsonError(context, 403, token, "Valid license required for signing.");
                 onLicenseIssue(msg);
                 return;
             }
 
-            string tempInputPath = null;
+            string tokenFolder = Path.Combine(Path.GetTempPath(), $"digisign_{token}_{DateTime.Now:yyyyMMddHHmmssfff}");
             try
             {
-                tempInputPath = downloader.DownloadDocument(docType, token);
-                Logger.Info($"Downloaded {docType} document for token '{token}' -> {tempInputPath}");
-            }
-            catch (DownloadException ex)
-            {
-                Logger.Error($"Download failed for {docType}/{token}", ex);
-                WriteJsonResponse(context, 502, false, null, $"Failed to download document: {ex.Message}");
-                return;
-            }
-
-            try
-            {
-                var cert = signatureService.LoadCertificate(xmlData.CommonName, xmlData.Pin, xmlData);
-                if (cert == null)
+                Logger.Info($"[token={token}] Fetching document manifest");
+                DocumentManifest manifest;
+                try
                 {
-                    Logger.Error($"Certificate not found for CN '{xmlData.CommonName}' processing {docType}/{token}");
-                    WriteJsonResponse(context, 500, false, null, "Signing certificate not available.");
+                    manifest = downloader.FetchManifest(token);
+                }
+                catch (DownloadException ex)
+                {
+                    Logger.Error($"[token={token}] Manifest fetch failed", ex);
+                    WriteJsonError(context, 502, token, $"Failed to fetch document manifest: {ex.Message}");
                     return;
                 }
 
-                string outputFileName = $"{docType.ToString().ToLowerInvariant()}_{token}_{DateTime.Now:yyyyMMddHHmmss}.pdf";
-                string outputPath = Path.Combine(xmlData.OutputFolderPath, outputFileName);
+                if (manifest == null || manifest.Documents == null || manifest.Documents.Count == 0)
+                {
+                    Logger.Warning($"[token={token}] Manifest returned zero documents - nothing to sign");
+                    WriteJsonError(context, 404, token, "No documents found for this token.");
+                    return;
+                }
+
+                Directory.CreateDirectory(tokenFolder);
+
+                Logger.Info($"[token={token}] Downloading {manifest.Documents.Count} document(s) into {tokenFolder}");
+                System.Collections.Generic.List<string> localFiles;
+                try
+                {
+                    localFiles = downloader.DownloadAll(manifest, tokenFolder);
+                }
+                catch (DownloadException ex)
+                {
+                    Logger.Error($"[token={token}] Download failed", ex);
+                    WriteJsonError(context, 502, token, $"Failed to download documents: {ex.Message}");
+                    return;
+                }
+
                 var signatureConfig = new SignatureConfiguration(
                     xmlData.XCoordinate, xmlData.YCoordinate, xmlData.Width, xmlData.Height, xmlData.SignOnPage);
 
-                Directory.CreateDirectory(xmlData.OutputFolderPath);
-                signatureService.SignPdf(tempInputPath, outputPath, cert, signatureConfig, xmlData.Pin, xmlData.OutputFolderPath);
+                var result = BatchSigner.SignFiles(localFiles, xmlData.OutputFolderPath, xmlData.CommonName, xmlData.Pin, signatureConfig, xmlData, progress: null);
 
-                Logger.Info($"Signed {docType}/{token} -> {outputPath}");
-                WriteJsonResponse(context, 200, true, outputPath, null);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Signing failed for {docType}/{token}", ex);
-                WriteJsonResponse(context, 500, false, null, $"Signing failed: {ex.Message}");
+                if (result.CertificateError != null)
+                {
+                    Logger.LogToPlf($"Token {token}: {result.CertificateError}", isError: true);
+                    WriteJsonError(context, 500, token, result.CertificateError);
+                    return;
+                }
+
+                Logger.LogToPlf($"Token {token}: {result.SuccessCount} succeeded, {result.FailCount} failed",
+                    isError: result.SuccessCount == 0 && result.FailCount > 0);
+
+                WriteBatchResultResponse(context, token, result);
             }
             finally
             {
-                if (tempInputPath != null)
+                try
                 {
-                    try { File.Delete(tempInputPath); } catch { }
+                    if (Directory.Exists(tokenFolder))
+                        Directory.Delete(tokenFolder, recursive: true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"[token={token}] Could not clean up temp folder: {ex.Message}");
                 }
             }
         }
 
-        private static void WriteJsonResponse(HttpListenerContext context, int statusCode, bool success, string outputPath, string error)
+        private static void WriteBatchResultResponse(HttpListenerContext context, string token, BatchSignResult result)
         {
-            string json = success
-                ? $"{{\"success\":true,\"outputPath\":\"{EscapeJson(outputPath)}\"}}"
+            bool success = result.FailCount == 0 && result.SuccessCount > 0;
+
+            var resultsJson = string.Join(",", result.FileResults.Select(r => r.Success
+                ? $"{{\"fileName\":\"{EscapeJson(r.FileName)}\",\"success\":true,\"outputPath\":\"{EscapeJson(r.OutputPath)}\"}}"
+                : $"{{\"fileName\":\"{EscapeJson(r.FileName)}\",\"success\":false,\"error\":\"{EscapeJson(r.Error)}\"}}"));
+
+            string json = $"{{\"success\":{(success ? "true" : "false")},\"token\":\"{EscapeJson(token)}\"," +
+                $"\"successCount\":{result.SuccessCount},\"failCount\":{result.FailCount},\"results\":[{resultsJson}]}}";
+
+            WriteJson(context, 200, json);
+        }
+
+        private static void WriteJsonError(HttpListenerContext context, int statusCode, string token, string error)
+        {
+            string json = token != null
+                ? $"{{\"success\":false,\"token\":\"{EscapeJson(token)}\",\"error\":\"{EscapeJson(error)}\"}}"
                 : $"{{\"success\":false,\"error\":\"{EscapeJson(error)}\"}}";
 
-            byte[] buffer = Encoding.UTF8.GetBytes(json);
+            WriteJson(context, statusCode, json);
+        }
 
+        private static void WriteJson(HttpListenerContext context, int statusCode, string json)
+        {
+            byte[] buffer = Encoding.UTF8.GetBytes(json);
             context.Response.StatusCode = statusCode;
             context.Response.ContentType = "application/json";
             context.Response.ContentLength64 = buffer.Length;
