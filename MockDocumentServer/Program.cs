@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,24 +7,19 @@ using Newtonsoft.Json;
 
 namespace MockDocumentServer
 {
-    internal class DocumentManifestEntry
+    internal class DocumentInfo
     {
+        public string Token { get; set; }
         public string FileName { get; set; }
         public string DocumentType { get; set; }
         public string DownloadUrl { get; set; }
     }
 
-    internal class DocumentManifest
-    {
-        public string Token { get; set; }
-        public List<DocumentManifestEntry> Documents { get; set; } = new List<DocumentManifestEntry>();
-    }
-
     internal class Program
     {
         private const string ExpectedApiKey = "local-dev-key";
-        private static readonly Regex ManifestRoute = new Regex(@"^/manifest/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex DocumentRoute = new Regex(@"^/document/([^/]+)/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex InfoRoute = new Regex(@"^/info/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex DocumentRoute = new Regex(@"^/document/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static void Main(string[] args)
         {
@@ -37,6 +30,7 @@ namespace MockDocumentServer
             listener.Start();
 
             Console.WriteLine($"Mock document server listening on http://localhost:{port}/ (expects header X-Api-Key: {ExpectedApiKey})");
+            Console.WriteLine("Routes: GET /info/{token}, GET /document/{token}");
             Console.WriteLine("Press Ctrl+C to stop.");
 
             var stopping = false;
@@ -99,11 +93,11 @@ namespace MockDocumentServer
                 return;
             }
 
-            var manifestMatch = ManifestRoute.Match(path);
-            if (manifestMatch.Success)
+            var infoMatch = InfoRoute.Match(path);
+            if (infoMatch.Success)
             {
-                string token = manifestMatch.Groups[1].Value;
-                WriteJson(context, 200, BuildManifest(token));
+                string token = infoMatch.Groups[1].Value;
+                WriteJson(context, 200, BuildInfo(token));
                 return;
             }
 
@@ -111,16 +105,9 @@ namespace MockDocumentServer
             if (documentMatch.Success)
             {
                 string token = documentMatch.Groups[1].Value;
-                string fileName = Uri.UnescapeDataString(documentMatch.Groups[2].Value);
-                var manifest = BuildManifest(token);
-                var entry = manifest.Documents.FirstOrDefault(d => d.FileName == fileName);
-                if (entry == null)
-                {
-                    WriteJson(context, 404, new { error = "unknown document for this token" });
-                    return;
-                }
+                var info = BuildInfo(token);
 
-                byte[] pdfBytes = FakePdfGenerator.Generate(token, entry.DocumentType, entry.FileName);
+                byte[] pdfBytes = FakePdfGenerator.Generate(token, info.DocumentType, info.FileName);
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/pdf";
                 context.Response.ContentLength64 = pdfBytes.Length;
@@ -129,34 +116,23 @@ namespace MockDocumentServer
                 return;
             }
 
-            WriteJson(context, 404, new { error = "unknown route. Expected /manifest/{token} or /document/{token}/{fileName}." });
+            WriteJson(context, 404, new { error = "unknown route. Expected /info/{token} or /document/{token}." });
         }
 
-        // Deterministic per token: same token always yields the same document set (1 invoice + 1-4 labels).
-        private static DocumentManifest BuildManifest(string token)
+        // Deterministic per token: same token always yields the same single document (doctype/filename).
+        private static DocumentInfo BuildInfo(string token)
         {
             var random = new Random(token.GetHashCode());
-            int labelCount = random.Next(1, 5);
+            string docType = random.NextDouble() < 0.7 ? "invoice" : "label";
+            string fileName = $"{docType}_{token}.pdf";
 
-            var manifest = new DocumentManifest { Token = token };
-            manifest.Documents.Add(new DocumentManifestEntry
+            return new DocumentInfo
             {
-                FileName = $"invoice_{token}.pdf",
-                DocumentType = "invoice",
-                DownloadUrl = $"/document/{token}/invoice_{token}.pdf"
-            });
-
-            for (int i = 1; i <= labelCount; i++)
-            {
-                manifest.Documents.Add(new DocumentManifestEntry
-                {
-                    FileName = $"label_{token}_{i}.pdf",
-                    DocumentType = "label",
-                    DownloadUrl = $"/document/{token}/label_{token}_{i}.pdf"
-                });
-            }
-
-            return manifest;
+                Token = token,
+                FileName = fileName,
+                DocumentType = docType,
+                DownloadUrl = $"/document/{token}"
+            };
         }
 
         private static void WriteJson(HttpListenerContext context, int statusCode, object payload)

@@ -7,5 +7,6 @@ namespace DigiSign
         public string InvoiceApiBaseUrl { get; set; } = "";
         public string InvoiceApiKey { get; set; } = "";
         public bool LaunchInBatchMode { get; set; } = false;
+        public string PrinterName { get; set; } = "";
     }
 }

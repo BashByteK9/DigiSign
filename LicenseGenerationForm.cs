@@ -10,6 +10,8 @@ namespace DigiSign
 {
     public class LicenseGenerationForm : Form
     {
+        private const string SystemDefaultPrinterLabel = "(System Default)";
+
         // Form controls
         private Label lblTitle;
         private TabControl tabControl;
@@ -56,6 +58,8 @@ namespace DigiSign
         private TextBox txtInvoiceApiKey;
         private CheckBox chkShowApiKey;
         private Label lblApiSettingsNote;
+        private Label lblPrinterName;
+        private ComboBox cmbPrinterName;
 
         // Settings Tab - Signature
         private TabPage tabSignature;
@@ -555,17 +559,29 @@ namespace DigiSign
             tabApiSettings.Controls.Add(chkShowApiKey);
             currentY += 30;
 
-            // Verbose Mode
-            chkVerboseMode = new CheckBox
+            // Printer selection
+            lblPrinterName = new Label
             {
-                Text = "Enable Verbose Mode (detailed signing logs)",
+                Text = "Printer (for print actions):",
                 Location = new Point(leftMargin, currentY),
-                Size = new Size(660, 20),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                ForeColor = Color.FromArgb(0, 102, 204)
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
             };
-            tabApiSettings.Controls.Add(chkVerboseMode);
-            currentY += 30;
+            tabApiSettings.Controls.Add(lblPrinterName);
+            currentY += labelHeight + 5;
+
+            cmbPrinterName = new ComboBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(400, textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbPrinterName.Items.Add(SystemDefaultPrinterLabel);
+            foreach (string printerName in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
+                cmbPrinterName.Items.Add(printerName);
+            tabApiSettings.Controls.Add(cmbPrinterName);
+            currentY += textBoxHeight + spacing + 10;
 
             // Batch Mode toggle
             chkBatchMode = new CheckBox
@@ -707,6 +723,18 @@ namespace DigiSign
             };
             chkShowPin.CheckedChanged += ChkShowPin_CheckedChanged;
             tabGeneral.Controls.Add(chkShowPin);
+            currentY += 30;
+
+            // Verbose Mode
+            chkVerboseMode = new CheckBox
+            {
+                Text = "Enable Verbose Mode (detailed signing logs)",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                ForeColor = Color.FromArgb(0, 102, 204)
+            };
+            tabGeneral.Controls.Add(chkVerboseMode);
         }
         
         private void CreateSignatureSettingsTab()
@@ -1175,6 +1203,25 @@ namespace DigiSign
             txtInvoiceApiBaseUrl.Text = settings.InvoiceApiBaseUrl ?? "";
             txtInvoiceApiKey.Text = settings.InvoiceApiKey ?? "";
             chkBatchMode.Checked = settings.LaunchInBatchMode;
+
+            if (string.IsNullOrWhiteSpace(settings.PrinterName))
+            {
+                cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
+            }
+            else
+            {
+                int index = cmbPrinterName.Items.IndexOf(settings.PrinterName);
+                if (index >= 0)
+                {
+                    cmbPrinterName.SelectedIndex = index;
+                }
+                else
+                {
+                    // Configured printer is no longer installed - surface it without crashing.
+                    cmbPrinterName.Items.Add($"{settings.PrinterName} (not found)");
+                    cmbPrinterName.SelectedIndex = cmbPrinterName.Items.Count - 1;
+                }
+            }
         }
 
         private void LoadDefaultSigningSettings()
@@ -1199,6 +1246,7 @@ namespace DigiSign
             txtInvoiceApiBaseUrl.Text = "";
             txtInvoiceApiKey.Text = "";
             chkBatchMode.Checked = false; // Default to listener/tray mode
+            cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
         }
         
         private void BtnSaveSettings_Click(object sender, EventArgs e)
@@ -1270,7 +1318,10 @@ namespace DigiSign
                     Port = (int)numListenerPort.Value,
                     InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
                     InvoiceApiKey = txtInvoiceApiKey.Text,
-                    LaunchInBatchMode = chkBatchMode.Checked
+                    LaunchInBatchMode = chkBatchMode.Checked,
+                    PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
+                        ? ""
+                        : cmbPrinterName.SelectedItem?.ToString() ?? ""
                 });
 
                 MessageBox.Show(
@@ -2290,6 +2341,21 @@ namespace DigiSign
                     btnSignPdf.Text = "Signing...";
                     Application.DoEvents();
 
+                    bool verboseMode = chkVerboseMode.Checked;
+                    VerboseProgressForm verboseForm = null;
+
+                    if (verboseMode)
+                    {
+                        verboseForm = new VerboseProgressForm();
+                        verboseForm.Show();
+                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
+                        verboseForm.AppendText($"{VersionInfo.TitleWithVersion} - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
+                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
+                        verboseForm.UpdateProgress(1, "Loading certificate...");
+                        verboseForm.AppendDetail($"Common Name: {commonName}");
+                        Application.DoEvents();
+                    }
+
                     try
                     {
                         // Load certificate
@@ -2297,6 +2363,12 @@ namespace DigiSign
 
                         if (cert == null)
                         {
+                            if (verboseMode)
+                            {
+                                verboseForm.AppendError($"Certificate not found: {commonName}");
+                                verboseForm.ProcessingComplete(true, 1);
+                            }
+
                             MessageBox.Show(
                                 $"Certificate '{commonName}' not found.\n\n" +
                                 "Please ensure:\n" +
@@ -2309,9 +2381,27 @@ namespace DigiSign
                             return;
                         }
 
+                        if (verboseMode)
+                        {
+                            verboseForm.AppendSuccess("Certificate loaded");
+                            verboseForm.AppendDetail($"Subject: {cert.Subject}");
+                            verboseForm.AppendDetail($"Expiry: {cert.NotAfter:yyyy-MM-dd}");
+                            verboseForm.UpdateProgress(5, "Signing PDF...");
+                            verboseForm.AppendDetail($"Input: {Path.GetFileName(inputPdfPath)}");
+                            verboseForm.AppendDetail($"Output: {Path.GetFileName(outputPdfPath)}");
+                            Application.DoEvents();
+                        }
+
                         // Sign the PDF
                         string outputFolder = Path.GetDirectoryName(outputPdfPath);
                         signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolder);
+
+                        if (verboseMode)
+                        {
+                            verboseForm.AppendSuccess("PDF signed successfully");
+                            verboseForm.AppendDetail($"Saved to: {outputPdfPath}");
+                            verboseForm.ProcessingComplete(true, 0);
+                        }
 
                         // Success
                         MessageBox.Show(
@@ -2331,6 +2421,15 @@ namespace DigiSign
                         {
                             System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outputPdfPath}\"");
                         }
+                    }
+                    catch (Exception)
+                    {
+                        if (verboseMode)
+                        {
+                            verboseForm.AppendError("PDF signing failed - see error dialog for details");
+                            verboseForm.ProcessingComplete(true, 1);
+                        }
+                        throw;
                     }
                     finally
                     {

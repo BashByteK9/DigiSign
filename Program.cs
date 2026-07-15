@@ -657,13 +657,14 @@ namespace DigiSign
             }
 
             int port = appSettings.Port > 0 ? appSettings.Port : 8943;
-            var downloader = new HttpDocumentSetDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey);
+            var downloader = new HttpDocumentDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey);
 
             using (var hostForm = new TrayHostForm())
             {
                 var listenerService = new HttpListenerService(port, xmlData, downloader, licensePath,
                     issue => hostForm.BeginInvoke(new Action(() =>
-                        MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))));
+                        MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))),
+                    new SpirePdfPrinter(), appSettings.PrinterName);
 
                 try
                 {
@@ -682,9 +683,12 @@ namespace DigiSign
 
                 using (var trayIcon = new NotifyIcon())
                 {
+                    StatusForm statusForm = null;
+
                     var menu = new ContextMenuStrip();
                     menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
                     menu.Items.Add(new ToolStripSeparator());
+                    menu.Items.Add("Settings...", null, (s, e) => RunSettingsMode());
                     menu.Items.Add("Open Logs Folder", null, (s, e) =>
                     {
                         try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
@@ -697,7 +701,21 @@ namespace DigiSign
                     trayIcon.ContextMenuStrip = menu;
                     trayIcon.MouseClick += (s, e) =>
                     {
-                        if (e.Button == MouseButtons.Left) RunSettingsMode();
+                        if (e.Button != MouseButtons.Left) return;
+
+                        if (statusForm == null || statusForm.IsDisposed)
+                        {
+                            statusForm = new StatusForm();
+                            statusForm.Show();
+                        }
+                        else
+                        {
+                            statusForm.Show();
+                            if (statusForm.WindowState == FormWindowState.Minimized)
+                                statusForm.WindowState = FormWindowState.Normal;
+                            statusForm.BringToFront();
+                            statusForm.Activate();
+                        }
                     };
                     trayIcon.Visible = true;
 
@@ -713,10 +731,19 @@ namespace DigiSign
             Logger.Info("Listen mode exited");
         }
 
+        private static volatile bool settingsFormOpen = false;
+
         static void RunSettingsMode()
         {
+            if (settingsFormOpen)
+            {
+                Logger.Debug("Settings form already open - ignoring duplicate request");
+                return;
+            }
+
             // Settings mode - no license required
             Logger.Info("Entering settings mode - no license required");
+            settingsFormOpen = true;
 
             try
             {
@@ -739,6 +766,10 @@ namespace DigiSign
                     "Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+            finally
+            {
+                settingsFormOpen = false;
             }
         }
 
