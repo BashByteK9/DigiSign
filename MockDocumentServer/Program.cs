@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -13,11 +14,15 @@ namespace MockDocumentServer
         public string FileName { get; set; }
         public string DocumentType { get; set; }
         public string DownloadUrl { get; set; }
+
+        [JsonIgnore]
+        public string FilePath { get; set; }
     }
 
     internal class Program
     {
         private const string ExpectedApiKey = "local-dev-key";
+        private const string PdfSourceFolder = @"C:\Users\Public\pdfs";
         private static readonly Regex InfoRoute = new Regex(@"^/info/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex DocumentRoute = new Regex(@"^/document/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -30,6 +35,7 @@ namespace MockDocumentServer
             listener.Start();
 
             Console.WriteLine($"Mock document server listening on http://localhost:{port}/ (expects header X-Api-Key: {ExpectedApiKey})");
+            Console.WriteLine($"Serving PDFs from: {PdfSourceFolder}");
             Console.WriteLine("Routes: GET /info/{token}, GET /document/{token}");
             Console.WriteLine("Press Ctrl+C to stop.");
 
@@ -97,7 +103,17 @@ namespace MockDocumentServer
             if (infoMatch.Success)
             {
                 string token = infoMatch.Groups[1].Value;
-                WriteJson(context, 200, BuildInfo(token));
+                DocumentInfo info;
+                try
+                {
+                    info = BuildInfo(token);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    WriteJson(context, 500, new { error = ex.Message });
+                    return;
+                }
+                WriteJson(context, 200, info);
                 return;
             }
 
@@ -105,9 +121,18 @@ namespace MockDocumentServer
             if (documentMatch.Success)
             {
                 string token = documentMatch.Groups[1].Value;
-                var info = BuildInfo(token);
+                DocumentInfo info;
+                try
+                {
+                    info = BuildInfo(token);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    WriteJson(context, 500, new { error = ex.Message });
+                    return;
+                }
 
-                byte[] pdfBytes = FakePdfGenerator.Generate(token, info.DocumentType, info.FileName);
+                byte[] pdfBytes = File.ReadAllBytes(info.FilePath);
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/pdf";
                 context.Response.ContentLength64 = pdfBytes.Length;
@@ -119,19 +144,29 @@ namespace MockDocumentServer
             WriteJson(context, 404, new { error = "unknown route. Expected /info/{token} or /document/{token}." });
         }
 
-        // Deterministic per token: same token always yields the same single document (doctype/filename).
+        // Deterministic per token: same token always yields the same file from PdfSourceFolder.
+        // Doctype is inferred from the filename ("INV*" -> invoice, anything else -> label).
         private static DocumentInfo BuildInfo(string token)
         {
+            string[] files = Directory.Exists(PdfSourceFolder)
+                ? Directory.GetFiles(PdfSourceFolder, "*.pdf")
+                : new string[0];
+
+            if (files.Length == 0)
+                throw new InvalidOperationException($"No PDF files found in {PdfSourceFolder}");
+
             var random = new Random(token.GetHashCode());
-            string docType = random.NextDouble() < 0.7 ? "invoice" : "label";
-            string fileName = $"{docType}_{token}.pdf";
+            string filePath = files[random.Next(files.Length)];
+            string fileName = Path.GetFileName(filePath);
+            string docType = fileName.StartsWith("INV", StringComparison.OrdinalIgnoreCase) ? "invoice" : "label";
 
             return new DocumentInfo
             {
                 Token = token,
                 FileName = fileName,
                 DocumentType = docType,
-                DownloadUrl = $"/document/{token}"
+                DownloadUrl = $"/document/{token}",
+                FilePath = filePath
             };
         }
 

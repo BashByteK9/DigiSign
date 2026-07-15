@@ -664,7 +664,7 @@ namespace DigiSign
                 var listenerService = new HttpListenerService(port, xmlData, downloader, licensePath,
                     issue => hostForm.BeginInvoke(new Action(() =>
                         MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))),
-                    new SpirePdfPrinter(), appSettings.PrinterName);
+                    new PdfiumPrintService(), appSettings.PrinterName);
 
                 try
                 {

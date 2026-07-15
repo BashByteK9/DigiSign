@@ -4,7 +4,8 @@ using System.Windows.Forms;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
-using Spire.Pdf;
+using PDFtoImage;
+using SkiaSharp;
 
 namespace DigiSign
 {
@@ -60,6 +61,7 @@ namespace DigiSign
         private Label lblApiSettingsNote;
         private Label lblPrinterName;
         private ComboBox cmbPrinterName;
+        private Button btnSaveApiSettings;
 
         // Settings Tab - Signature
         private TabPage tabSignature;
@@ -592,6 +594,21 @@ namespace DigiSign
                 Font = new Font("Segoe UI", 9)
             };
             tabApiSettings.Controls.Add(chkBatchMode);
+            currentY += 40;
+
+            btnSaveApiSettings = new Button
+            {
+                Text = "Save API Settings",
+                Size = new Size(150, 35),
+                Location = new Point(leftMargin, currentY),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnSaveApiSettings.FlatAppearance.BorderSize = 0;
+            btnSaveApiSettings.Click += BtnSaveApiSettings_Click;
+            tabApiSettings.Controls.Add(btnSaveApiSettings);
         }
 
         private void CreateGeneralSettingsTab()
@@ -1342,6 +1359,40 @@ namespace DigiSign
             }
         }
         
+        private void BtnSaveApiSettings_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                AppSettingsLoader.Save(new AppSettings
+                {
+                    VerboseMode = chkVerboseMode.Checked,
+                    Port = (int)numListenerPort.Value,
+                    InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
+                    InvoiceApiKey = txtInvoiceApiKey.Text,
+                    LaunchInBatchMode = chkBatchMode.Checked,
+                    PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
+                        ? ""
+                        : cmbPrinterName.SelectedItem?.ToString() ?? ""
+                });
+
+                MessageBox.Show(
+                    "API settings saved successfully!\n\nRestart the listener ('DigiSign.exe /listen') for changes to take effect.",
+                    "Settings Saved",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Error saving API settings: {ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
         private void BtnResetSettings_Click(object sender, EventArgs e)
         {
             var result = MessageBox.Show(
@@ -1911,12 +1962,11 @@ namespace DigiSign
                 
                 try
                 {
-                    // Use Spire.Pdf to render actual PDF content
-                    PdfDocument pdfDoc = new PdfDocument();
-                    pdfDoc.LoadFromFile(pdfPath);
-                    
+                    // Use PDFtoImage (PDFium + SkiaSharp) to render actual PDF content
+                    byte[] pdfBytes = File.ReadAllBytes(pdfPath);
+
                     // Update page count in combo box if needed
-                    int totalPages = pdfDoc.Pages.Count;
+                    int totalPages = Conversion.GetPageCount(pdfBytes);
                     if (cmbPreviewPage.Items.Count != totalPages)
                     {
                         int selectedIndex = cmbPreviewPage.SelectedIndex;
@@ -1927,32 +1977,37 @@ namespace DigiSign
                         }
                         cmbPreviewPage.SelectedIndex = Math.Min(selectedIndex, totalPages - 1);
                     }
-                    
+
                     // Ensure page number is valid
                     if (pageNumber > totalPages)
                     {
                         pageNumber = totalPages;
                     }
-                    
+
                     // Get page size
-                    float pdfWidth = pdfDoc.Pages[pageNumber - 1].Size.Width;
-                    float pdfHeight = pdfDoc.Pages[pageNumber - 1].Size.Height;
+                    SizeF pdfPageSize = Conversion.GetPageSize(pdfBytes, pageNumber - 1);
+                    float pdfWidth = pdfPageSize.Width;
+                    float pdfHeight = pdfPageSize.Height;
 
                     // Store actual PDF dimensions for resize handle positioning
                     currentPdfWidth = pdfWidth;
                     currentPdfHeight = pdfHeight;
-                    
-                    // Render the PDF page to an image using Spire.Pdf
-                    // SaveAsImage returns System.Drawing.Image
-                    using (System.Drawing.Image pageImage = pdfDoc.SaveAsImage(pageNumber - 1))
+
+                    // Render the PDF page to an image using PDFtoImage
+                    var renderOptions = new RenderOptions(Width: width, Height: height, WithAnnotations: true, WithFormFill: true);
+                    using (SKBitmap pageBitmap = Conversion.ToImage(pdfBytes, pageNumber - 1, password: null, options: renderOptions))
+                    using (var pngStream = new MemoryStream())
                     {
-                        // Draw the rendered PDF page onto our bitmap, scaled to fit
-                        g.DrawImage(pageImage, 0, 0, width, height);
+                        pageBitmap.Encode(pngStream, SKEncodedImageFormat.Png, 100);
+                        pngStream.Position = 0;
+
+                        using (System.Drawing.Image pageImage = System.Drawing.Image.FromStream(pngStream))
+                        {
+                            // Draw the rendered PDF page onto our bitmap, scaled to fit
+                            g.DrawImage(pageImage, 0, 0, width, height);
+                        }
                     }
-                    
-                    // Close the PDF document
-                    pdfDoc.Close();
-                    
+
                     // Draw semi-transparent info overlay at top
                     using (Font titleFont = new Font("Segoe UI", 9 * zoomLevel, FontStyle.Bold))
                     using (Font infoFont = new Font("Segoe UI", 7 * zoomLevel))
@@ -1983,7 +2038,7 @@ namespace DigiSign
                 }
                 catch (Exception ex)
                 {
-                    // If Spire.Pdf rendering fails, fall back to iTextSharp metadata-only view
+                    // If PDFtoImage rendering fails, fall back to iTextSharp metadata-only view
                     try
                     {
                         using (var reader = new iTextSharp.text.pdf.PdfReader(pdfPath))
