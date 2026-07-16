@@ -25,6 +25,9 @@ namespace DigiSign
         public float CopyLabelWidth { get; set; }
         public float CopyLabelHeight { get; set; }
 
+        public bool EnableOcspCheck { get; set; } = true;
+        public int OcspTimeoutSeconds { get; set; } = 10;
+
         public SignatureConfiguration(float x, float y, float width, float height)
         {
             XCoordinate = x;

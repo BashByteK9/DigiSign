@@ -1,16 +1,20 @@
 using System;
-using System.IO;
 using System.Net.Http;
+using System.Text;
 using Newtonsoft.Json;
 
 namespace DigiSign
 {
-    public class DocumentInfo
+    public class TokenInvoice
     {
-        public string Token { get; set; }
-        public string FileName { get; set; }
-        public string DocumentType { get; set; } // "invoice" | "label"
-        public string DownloadUrl { get; set; }
+        public string TokenId { get; set; }
+        public string InvoiceNo { get; set; }
+    }
+
+    public class SignRequestBatch
+    {
+        public string ClientId { get; set; }
+        public System.Collections.Generic.List<TokenInvoice> Tokens { get; set; }
     }
 
     public class DownloadException : Exception
@@ -18,25 +22,24 @@ namespace DigiSign
         public DownloadException(string message, Exception inner = null) : base(message, inner) { }
     }
 
+    public class CallbackException : Exception
+    {
+        public CallbackException(string message, Exception inner = null) : base(message, inner) { }
+    }
+
     public interface IDocumentDownloader
     {
         /// <summary>
-        /// Fetches metadata (doctype, filename, download URL) for the single document tied to a token.
-        /// Throws DownloadException on failure.
+        /// Fetches the raw PDF bytes for a single invoice. Throws DownloadException on failure.
         /// </summary>
-        DocumentInfo FetchInfo(string token);
+        byte[] FetchInvoiceDocument(string clientId, string tokenId);
 
         /// <summary>
-        /// Downloads the document described by info into destinationFolder and returns the local file path.
-        /// Throws DownloadException on failure.
+        /// Posts the signed PDF back to the ERP's invoice-signed callback. Throws CallbackException on failure.
         /// </summary>
-        string Download(DocumentInfo info, string destinationFolder);
+        void PostSignedInvoiceCallback(string clientId, string tokenId, string invoiceNo, byte[] signedPdfBytes);
     }
 
-    // TODO: PLACEHOLDER - the real invoice/label document-provider API contract (endpoint shape,
-    // auth scheme, response format) is not yet known. This targets the local MockDocumentServer's
-    // /info/{token} and /document/{token} routes; replace the request-building logic below once the
-    // real API is specified - the IDocumentDownloader shape shouldn't need to change.
     public class HttpDocumentDownloader : IDocumentDownloader
     {
         private static readonly HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -44,64 +47,84 @@ namespace DigiSign
         private readonly string baseUrl;
         private readonly string apiKey;
 
+        private class InvoiceFetchRequest
+        {
+            public string ClientId { get; set; }
+            public string TokenId { get; set; }
+        }
+
+        private class InvoiceSignedRequest
+        {
+            public string ClientId { get; set; }
+            public string TokenId { get; set; }
+            public string InvoiceNo { get; set; }
+
+            [JsonProperty("signed-pdf")]
+            public string SignedPdfBase64 { get; set; }
+        }
+
         public HttpDocumentDownloader(string baseUrl, string apiKey)
         {
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
         }
 
-        public DocumentInfo FetchInfo(string token)
+        public byte[] FetchInvoiceDocument(string clientId, string tokenId)
         {
             if (string.IsNullOrWhiteSpace(baseUrl))
                 throw new DownloadException("Invoice/Label API base URL is not configured. Set it under the API Settings tab.");
 
-            string url = $"{baseUrl.TrimEnd('/')}/info/{Uri.EscapeDataString(token)}";
+            string url = $"{baseUrl.TrimEnd('/')}/invoice/";
+            string json = JsonConvert.SerializeObject(new InvoiceFetchRequest { ClientId = clientId, TokenId = tokenId });
 
             try
             {
-                using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                 {
+                    request.Content = new StringContent(json, Encoding.UTF8, "application/json");
                     if (!string.IsNullOrEmpty(apiKey))
                         request.Headers.Add("X-Api-Key", apiKey); // TODO: confirm real auth header/scheme
 
                     var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
                     response.EnsureSuccessStatusCode();
-                    string json = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                    return JsonConvert.DeserializeObject<DocumentInfo>(json);
+                    return response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
                 }
             }
             catch (Exception ex) when (!(ex is DownloadException))
             {
-                throw new DownloadException($"Failed to fetch document info for token '{token}': {ex.Message}", ex);
+                throw new DownloadException($"Failed to fetch invoice document for token '{tokenId}': {ex.Message}", ex);
             }
         }
 
-        public string Download(DocumentInfo info, string destinationFolder)
+        public void PostSignedInvoiceCallback(string clientId, string tokenId, string invoiceNo, byte[] signedPdfBytes)
         {
-            string url = info.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                ? info.DownloadUrl
-                : $"{baseUrl.TrimEnd('/')}{info.DownloadUrl}";
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                throw new CallbackException("Invoice/Label API base URL is not configured. Set it under the API Settings tab.");
+
+            string url = $"{baseUrl.TrimEnd('/')}/invoice-signed/";
+            string json = JsonConvert.SerializeObject(new InvoiceSignedRequest
+            {
+                ClientId = clientId,
+                TokenId = tokenId,
+                InvoiceNo = invoiceNo,
+                SignedPdfBase64 = Convert.ToBase64String(signedPdfBytes)
+            });
 
             try
             {
-                using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                 {
+                    request.Content = new StringContent(json, Encoding.UTF8, "application/json");
                     if (!string.IsNullOrEmpty(apiKey))
                         request.Headers.Add("X-Api-Key", apiKey);
 
                     var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
                     response.EnsureSuccessStatusCode();
-                    byte[] bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-
-                    string safeFileName = string.Join("_", (info.FileName ?? $"{Guid.NewGuid():N}.pdf").Split(Path.GetInvalidFileNameChars()));
-                    string localPath = Path.Combine(destinationFolder, safeFileName);
-                    File.WriteAllBytes(localPath, bytes);
-                    return localPath;
                 }
             }
-            catch (Exception ex) when (!(ex is DownloadException))
+            catch (Exception ex) when (!(ex is CallbackException))
             {
-                throw new DownloadException($"Failed to download '{info.FileName}' ({info.DownloadUrl}): {ex.Message}", ex);
+                throw new CallbackException($"Failed to post invoice-signed callback for token '{tokenId}': {ex.Message}", ex);
             }
         }
     }

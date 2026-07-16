@@ -19,12 +19,28 @@ namespace MockDocumentServer
         public string FilePath { get; set; }
     }
 
+    internal class InvoiceFetchRequest
+    {
+        public string ClientId { get; set; }
+        public string TokenId { get; set; }
+    }
+
+    internal class InvoiceSignedCallback
+    {
+        public string ClientId { get; set; }
+        public string TokenId { get; set; }
+        public string InvoiceNo { get; set; }
+
+        [JsonProperty("signed-pdf")]
+        public string SignedPdfBase64 { get; set; }
+    }
+
     internal class Program
     {
         private const string ExpectedApiKey = "local-dev-key";
         private const string PdfSourceFolder = @"C:\Users\Public\pdfs";
-        private static readonly Regex InfoRoute = new Regex(@"^/info/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex DocumentRoute = new Regex(@"^/document/([^/]+)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex InvoiceRoute = new Regex(@"^/invoice/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex InvoiceSignedRoute = new Regex(@"^/invoice-signed/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static void Main(string[] args)
         {
@@ -36,7 +52,7 @@ namespace MockDocumentServer
 
             Console.WriteLine($"Mock document server listening on http://localhost:{port}/ (expects header X-Api-Key: {ExpectedApiKey})");
             Console.WriteLine($"Serving PDFs from: {PdfSourceFolder}");
-            Console.WriteLine("Routes: GET /info/{token}, GET /document/{token}");
+            Console.WriteLine("Routes: POST /invoice/, POST /invoice-signed/");
             Console.WriteLine("Press Ctrl+C to stop.");
 
             var stopping = false;
@@ -99,32 +115,30 @@ namespace MockDocumentServer
                 return;
             }
 
-            var infoMatch = InfoRoute.Match(path);
-            if (infoMatch.Success)
+            if (InvoiceRoute.IsMatch(path))
             {
-                string token = infoMatch.Groups[1].Value;
-                DocumentInfo info;
+                string body = ReadBody(context);
+                InvoiceFetchRequest fetchRequest;
                 try
                 {
-                    info = BuildInfo(token);
+                    fetchRequest = JsonConvert.DeserializeObject<InvoiceFetchRequest>(body);
                 }
-                catch (InvalidOperationException ex)
+                catch (JsonException ex)
                 {
-                    WriteJson(context, 500, new { error = ex.Message });
+                    WriteJson(context, 400, new { error = $"invalid JSON body: {ex.Message}" });
                     return;
                 }
-                WriteJson(context, 200, info);
-                return;
-            }
 
-            var documentMatch = DocumentRoute.Match(path);
-            if (documentMatch.Success)
-            {
-                string token = documentMatch.Groups[1].Value;
+                if (fetchRequest == null || string.IsNullOrWhiteSpace(fetchRequest.TokenId))
+                {
+                    WriteJson(context, 400, new { error = "TokenId is required." });
+                    return;
+                }
+
                 DocumentInfo info;
                 try
                 {
-                    info = BuildInfo(token);
+                    info = BuildInfo(fetchRequest.TokenId);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -133,6 +147,7 @@ namespace MockDocumentServer
                 }
 
                 byte[] pdfBytes = File.ReadAllBytes(info.FilePath);
+                Console.WriteLine($"  -> /invoice/ ClientId={fetchRequest.ClientId} TokenId={fetchRequest.TokenId} -> {Path.GetFileName(info.FilePath)}");
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/pdf";
                 context.Response.ContentLength64 = pdfBytes.Length;
@@ -141,7 +156,27 @@ namespace MockDocumentServer
                 return;
             }
 
-            WriteJson(context, 404, new { error = "unknown route. Expected /info/{token} or /document/{token}." });
+            if (InvoiceSignedRoute.IsMatch(path))
+            {
+                string body = ReadBody(context);
+                InvoiceSignedCallback callback;
+                try
+                {
+                    callback = JsonConvert.DeserializeObject<InvoiceSignedCallback>(body);
+                }
+                catch (JsonException ex)
+                {
+                    WriteJson(context, 400, new { error = $"invalid JSON body: {ex.Message}" });
+                    return;
+                }
+
+                int base64Length = callback?.SignedPdfBase64?.Length ?? 0;
+                Console.WriteLine($"  -> /invoice-signed/ ClientId={callback?.ClientId} TokenId={callback?.TokenId} InvoiceNo={callback?.InvoiceNo} signed-pdf length={base64Length}");
+                WriteJson(context, 200, new { success = true });
+                return;
+            }
+
+            WriteJson(context, 404, new { error = "unknown route. Expected POST /invoice/ or POST /invoice-signed/." });
         }
 
         // Deterministic per token: same token always yields the same file from PdfSourceFolder.
@@ -168,6 +203,14 @@ namespace MockDocumentServer
                 DownloadUrl = $"/document/{token}",
                 FilePath = filePath
             };
+        }
+
+        private static string ReadBody(HttpListenerContext context)
+        {
+            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+            {
+                return reader.ReadToEnd();
+            }
         }
 
         private static void WriteJson(HttpListenerContext context, int statusCode, object payload)

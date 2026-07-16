@@ -8,5 +8,7 @@ namespace DigiSign
         public string InvoiceApiKey { get; set; } = "";
         public bool LaunchInBatchMode { get; set; } = false;
         public string PrinterName { get; set; } = "";
+        public bool EnableOcspCheck { get; set; } = true;
+        public int OcspTimeoutSeconds { get; set; } = 10;
     }
 }

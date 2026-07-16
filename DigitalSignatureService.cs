@@ -263,7 +263,7 @@ namespace DigiSign
                     // Create signature with resilient TSA client
                     IExternalSignature externalSignature = new SignatureHelper.SafeCertificateSignature(cert, "SHA-256");
                     Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
-                    var ocspClient = new OcspClientBouncyCastle();
+                    IOcspClient ocspClient = new SignatureHelper.ResilientOcspClient(config.EnableOcspCheck, config.OcspTimeoutSeconds);
 
                     // Use resilient TSA client that handles fallback internally
                     ITSAClient tsaClient = new SignatureHelper.ResilientTSAClient();

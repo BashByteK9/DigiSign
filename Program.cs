@@ -426,7 +426,9 @@ namespace DigiSign
                         CopyLabelX = xmlData.CopyLabelX,
                         CopyLabelY = xmlData.CopyLabelY,
                         CopyLabelWidth = xmlData.CopyLabelWidth,
-                        CopyLabelHeight = xmlData.CopyLabelHeight
+                        CopyLabelHeight = xmlData.CopyLabelHeight,
+                        EnableOcspCheck = appSettings.EnableOcspCheck,
+                        OcspTimeoutSeconds = appSettings.OcspTimeoutSeconds
                     };
                     IBatchSignProgress progress = isVerboseMode ? new VerboseBatchSignProgress(verboseForm) : null;
 
@@ -683,7 +685,8 @@ namespace DigiSign
                 var listenerService = new HttpListenerService(port, xmlData, downloader, licensePath,
                     issue => hostForm.BeginInvoke(new Action(() =>
                         MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))),
-                    new PdfiumPrintService(), appSettings.PrinterName);
+                    new PdfiumPrintService(), appSettings.PrinterName,
+                    appSettings.EnableOcspCheck, appSettings.OcspTimeoutSeconds);
 
                 try
                 {

@@ -77,6 +77,11 @@ namespace DigiSign
                 "http://tsa.startssl.com/rfc3161"
             };
 
+            // TSAClientBouncyCastle has no configurable timeout, so a hanging (not just
+            // erroring) server would otherwise stall this attempt for a long time before
+            // falling through to the next server in the list.
+            private const int PerServerTimeoutMs = 15000;
+
             public int GetTokenSizeEstimate()
             {
                 return 4096; // Standard estimate for TSA token size
@@ -99,8 +104,15 @@ namespace DigiSign
                     {
                         Logger.Debug($"Attempting to get timestamp from: {tsaUrl}");
                         var tsaClient = new TSAClientBouncyCastle(tsaUrl);
-                        var token = tsaClient.GetTimeStampToken(imprint);
+                        var task = System.Threading.Tasks.Task.Run(() => tsaClient.GetTimeStampToken(imprint));
 
+                        if (!task.Wait(PerServerTimeoutMs))
+                        {
+                            Logger.Warning($"TSA server {tsaUrl} timed out after {PerServerTimeoutMs / 1000}s");
+                            continue;
+                        }
+
+                        var token = task.Result;
                         if (token != null && token.Length > 0)
                         {
                             Logger.Info($"Successfully obtained timestamp from: {tsaUrl}");
@@ -112,7 +124,7 @@ namespace DigiSign
                         lastException = ex;
 
                         // Check if it's a network/DNS error
-                        if (ex.Message.Contains("could not be resolved") || 
+                        if (ex.Message.Contains("could not be resolved") ||
                             ex.Message.Contains("Unable to connect") ||
                             ex.Message.Contains("timeout") ||
                             ex.InnerException?.Message.Contains("could not be resolved") == true)
@@ -132,6 +144,51 @@ namespace DigiSign
                 Logger.Warning($"All TSA servers failed. Last error: {lastException?.Message}");
                 Logger.Warning("Signing without timestamp (signature will still be valid)");
                 return null; // iTextSharp will handle null gracefully
+            }
+        }
+
+        /// <summary>
+        /// OCSP client that can be disabled and has a bounded timeout, so an unreachable/slow
+        /// CA responder can't hang signing indefinitely. Only one responder is available per
+        /// certificate (from its AIA extension), so unlike ResilientTSAClient there is no
+        /// server fallback list - just a fail-fast timeout.
+        /// </summary>
+        public class ResilientOcspClient : IOcspClient
+        {
+            private readonly bool enabled;
+            private readonly int timeoutMs;
+
+            public ResilientOcspClient(bool enabled, int timeoutSeconds)
+            {
+                this.enabled = enabled;
+                this.timeoutMs = Math.Max(1, timeoutSeconds) * 1000;
+            }
+
+            public byte[] GetEncoded(Org.BouncyCastle.X509.X509Certificate checkCert, Org.BouncyCastle.X509.X509Certificate rootCert, string url)
+            {
+                if (!enabled)
+                {
+                    Logger.Debug("OCSP check disabled by configuration - signing without OCSP data");
+                    return null;
+                }
+
+                try
+                {
+                    var inner = new OcspClientBouncyCastle();
+                    var task = System.Threading.Tasks.Task.Run(() => inner.GetEncoded(checkCert, rootCert, url));
+                    if (task.Wait(timeoutMs))
+                    {
+                        return task.Result;
+                    }
+
+                    Logger.Warning($"OCSP check timed out after {timeoutMs / 1000}s - signing without OCSP data");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"OCSP check failed: {ex.Message} - signing without OCSP data");
+                    return null;
+                }
             }
         }
     }

@@ -48,6 +48,9 @@ namespace DigiSign
         private CheckBox chkShowPin;
         private CheckBox chkVerboseMode;
         private CheckBox chkBatchMode;
+        private CheckBox chkEnableOcspCheck;
+        private Label lblOcspTimeoutSeconds;
+        private NumericUpDown numOcspTimeoutSeconds;
 
         // API Settings Tab (listener / invoice-label download configuration)
         private TabPage tabApiSettings;
@@ -576,31 +579,7 @@ namespace DigiSign
             };
             chkShowApiKey.CheckedChanged += ChkShowApiKey_CheckedChanged;
             tabApiSettings.Controls.Add(chkShowApiKey);
-            currentY += 30;
-
-            // Printer selection
-            lblPrinterName = new Label
-            {
-                Text = "Printer (for print actions):",
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(660, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            tabApiSettings.Controls.Add(lblPrinterName);
-            currentY += labelHeight + 5;
-
-            cmbPrinterName = new ComboBox
-            {
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(400, textBoxHeight),
-                Font = new Font("Segoe UI", 9),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbPrinterName.Items.Add(SystemDefaultPrinterLabel);
-            foreach (string printerName in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
-                cmbPrinterName.Items.Add(printerName);
-            tabApiSettings.Controls.Add(cmbPrinterName);
-            currentY += textBoxHeight + spacing + 10;
+            currentY += 40;
 
             // Batch Mode toggle
             chkBatchMode = new CheckBox
@@ -631,6 +610,7 @@ namespace DigiSign
         private void CreateGeneralSettingsTab()
         {
             tabGeneral = new TabPage("General");
+            tabGeneral.AutoScroll = true;
             tabSettingsControl.TabPages.Add(tabGeneral);
             
             int leftMargin = 20;
@@ -769,6 +749,65 @@ namespace DigiSign
                 ForeColor = Color.FromArgb(0, 102, 204)
             };
             tabGeneral.Controls.Add(chkVerboseMode);
+            currentY += 40;
+
+            // Printer selection
+            lblPrinterName = new Label
+            {
+                Text = "Printer (for print actions):",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabGeneral.Controls.Add(lblPrinterName);
+            currentY += labelHeight + 5;
+
+            cmbPrinterName = new ComboBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(400, textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbPrinterName.Items.Add(SystemDefaultPrinterLabel);
+            foreach (string printerName in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
+                cmbPrinterName.Items.Add(printerName);
+            tabGeneral.Controls.Add(cmbPrinterName);
+            currentY += textBoxHeight + spacing + 10;
+
+            // OCSP (certificate authority revocation) check
+            chkEnableOcspCheck = new CheckBox
+            {
+                Text = "Check certificate revocation status (OCSP) before signing",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9),
+                Checked = true
+            };
+            tabGeneral.Controls.Add(chkEnableOcspCheck);
+            currentY += 30;
+
+            lblOcspTimeoutSeconds = new Label
+            {
+                Text = "OCSP check timeout (seconds):",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(220, labelHeight),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabGeneral.Controls.Add(lblOcspTimeoutSeconds);
+
+            numOcspTimeoutSeconds = new NumericUpDown
+            {
+                Location = new Point(leftMargin + 230, currentY - 2),
+                Size = new Size(80, textBoxHeight),
+                Font = new Font("Segoe UI", 9),
+                Minimum = 1,
+                Maximum = 60,
+                DecimalPlaces = 0,
+                Value = 10
+            };
+            tabGeneral.Controls.Add(numOcspTimeoutSeconds);
+            currentY += textBoxHeight + spacing + 10;
         }
         
         private void CreateSignatureSettingsTab()
@@ -1376,6 +1415,10 @@ namespace DigiSign
                     cmbPrinterName.SelectedIndex = cmbPrinterName.Items.Count - 1;
                 }
             }
+
+            chkEnableOcspCheck.Checked = settings.EnableOcspCheck;
+            int ocspTimeout = settings.OcspTimeoutSeconds;
+            numOcspTimeoutSeconds.Value = ocspTimeout >= 1 && ocspTimeout <= 60 ? ocspTimeout : 10;
         }
 
         private void LoadDefaultSigningSettings()
@@ -1416,6 +1459,8 @@ namespace DigiSign
             txtInvoiceApiKey.Text = "";
             chkBatchMode.Checked = false; // Default to listener/tray mode
             cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
+            chkEnableOcspCheck.Checked = true;
+            numOcspTimeoutSeconds.Value = 10;
         }
         
         private void BtnSaveSettings_Click(object sender, EventArgs e)
@@ -1531,7 +1576,9 @@ namespace DigiSign
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
-                        : cmbPrinterName.SelectedItem?.ToString() ?? ""
+                        : cmbPrinterName.SelectedItem?.ToString() ?? "",
+                    EnableOcspCheck = chkEnableOcspCheck.Checked,
+                    OcspTimeoutSeconds = (int)numOcspTimeoutSeconds.Value
                 });
 
                 MessageBox.Show(
@@ -1565,7 +1612,9 @@ namespace DigiSign
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
-                        : cmbPrinterName.SelectedItem?.ToString() ?? ""
+                        : cmbPrinterName.SelectedItem?.ToString() ?? "",
+                    EnableOcspCheck = chkEnableOcspCheck.Checked,
+                    OcspTimeoutSeconds = (int)numOcspTimeoutSeconds.Value
                 });
 
                 MessageBox.Show(
