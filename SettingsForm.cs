@@ -38,13 +38,30 @@ namespace DigiSign
         private NumericUpDown numWidth;
         private Label lblHeight;
         private NumericUpDown numHeight;
-        private Label lblSignOnPage;
-        private ComboBox cmbSignOnPage;
         private Label lblOpenOutputFolder;
         private ComboBox cmbOpenOutputFolder;
         private Label lblUseSelfSigned;
         private ComboBox cmbUseSelfSigned;
-        
+        private Label lblCopy1Label;
+        private TextBox txtCopy1Label;
+        private Label lblCopyPosition;
+        private Label lblCopyX;
+        private NumericUpDown numCopyX;
+        private Label lblCopyY;
+        private NumericUpDown numCopyY;
+        private Label lblCopyWidth;
+        private NumericUpDown numCopyWidth;
+        private Label lblCopyHeight;
+        private NumericUpDown numCopyHeight;
+        private CheckBox chkExtraCopies;
+        private CheckBox chkPrintAllCopies;
+        private Label lblCopy2Label;
+        private TextBox txtCopy2Label;
+        private Label lblCopy3Label;
+        private TextBox txtCopy3Label;
+        private Label lblCopy4Label;
+        private TextBox txtCopy4Label;
+
         // Buttons
         private Button btnSave;
         private Button btnCancel;
@@ -277,6 +294,7 @@ namespace DigiSign
         private void CreateSignatureTab()
         {
             tabSignature = new TabPage("Signature");
+            tabSignature.AutoScroll = true;
             tabControl.TabPages.Add(tabSignature);
             
             int leftMargin = 20;
@@ -373,31 +391,6 @@ namespace DigiSign
             tabSignature.Controls.Add(numHeight);
             currentY += controlHeight + spacing + 15;
             
-            // Sign On Page
-            lblSignOnPage = new Label
-            {
-                Text = "Sign On Page:",
-                Location = new Point(leftMargin, currentY),
-                Size = new Size(200, labelHeight),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            tabSignature.Controls.Add(lblSignOnPage);
-            
-            cmbSignOnPage = new ComboBox
-            {
-                Location = new Point(leftMargin + 210, currentY),
-                Size = new Size(200, controlHeight),
-                Font = new Font("Segoe UI", 9),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbSignOnPage.Items.AddRange(new object[] { 
-                "F - First Page", 
-                "E - Each Page", 
-                "L - Last Page" 
-            });
-            tabSignature.Controls.Add(cmbSignOnPage);
-            currentY += controlHeight + spacing + 5;
-            
             // Open Output Folder
             lblOpenOutputFolder = new Label
             {
@@ -438,8 +431,128 @@ namespace DigiSign
             };
             cmbUseSelfSigned.Items.AddRange(new object[] { "Y - Yes", "N - No" });
             tabSignature.Controls.Add(cmbUseSelfSigned);
+            currentY += controlHeight + spacing + 15;
+
+            // Copy 1 label (mandatory - always stamped)
+            lblCopy1Label = new Label
+            {
+                Text = "Copy Label:",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(200, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabSignature.Controls.Add(lblCopy1Label);
+
+            txtCopy1Label = new TextBox
+            {
+                Location = new Point(leftMargin + 210, currentY),
+                Size = new Size(200, controlHeight),
+                Font = new Font("Segoe UI", 9),
+                Text = "Original for Buyer"
+            };
+            txtCopy1Label.Leave += TxtCopy1Label_Leave;
+            tabSignature.Controls.Add(txtCopy1Label);
+            currentY += controlHeight + spacing + 5;
+
+            // Shared copy label position
+            lblCopyPosition = new Label
+            {
+                Text = "Copy Label Position:",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Italic),
+                ForeColor = Color.FromArgb(64, 64, 64)
+            };
+            tabSignature.Controls.Add(lblCopyPosition);
+            currentY += labelHeight + spacing;
+
+            lblCopyX = new Label { Text = "X Coordinate of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopyX);
+            numCopyX = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 0, Maximum = 10000, DecimalPlaces = 0 };
+            tabSignature.Controls.Add(numCopyX);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopyY = new Label { Text = "Y Coordinate of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopyY);
+            numCopyY = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 0, Maximum = 10000, DecimalPlaces = 0 };
+            tabSignature.Controls.Add(numCopyY);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopyWidth = new Label { Text = "Width of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopyWidth);
+            numCopyWidth = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 10, Maximum = 10000, DecimalPlaces = 0 };
+            tabSignature.Controls.Add(numCopyWidth);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopyHeight = new Label { Text = "Height of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopyHeight);
+            numCopyHeight = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 10, Maximum = 10000, DecimalPlaces = 0 };
+            tabSignature.Controls.Add(numCopyHeight);
+            currentY += controlHeight + spacing + 15;
+
+            // Extra Copies
+            chkExtraCopies = new CheckBox
+            {
+                Text = "Extra Copies",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(200, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            chkExtraCopies.CheckedChanged += ChkExtraCopies_CheckedChanged;
+            tabSignature.Controls.Add(chkExtraCopies);
+            currentY += controlHeight + spacing + 5;
+
+            chkPrintAllCopies = new CheckBox
+            {
+                Text = "Print all copies",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(200, labelHeight),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabSignature.Controls.Add(chkPrintAllCopies);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopy2Label = new Label { Text = "Copy 2 Label:", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopy2Label);
+            txtCopy2Label = new TextBox { Location = new Point(leftMargin + 210, currentY), Size = new Size(200, controlHeight), Font = new Font("Segoe UI", 9), Text = "Duplicate for Transporter" };
+            tabSignature.Controls.Add(txtCopy2Label);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopy3Label = new Label { Text = "Copy 3 Label:", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopy3Label);
+            txtCopy3Label = new TextBox { Location = new Point(leftMargin + 210, currentY), Size = new Size(200, controlHeight), Font = new Font("Segoe UI", 9), Text = "Duplicate for Supplier" };
+            tabSignature.Controls.Add(txtCopy3Label);
+            currentY += controlHeight + spacing + 5;
+
+            lblCopy4Label = new Label { Text = "Copy 4 Label:", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            tabSignature.Controls.Add(lblCopy4Label);
+            txtCopy4Label = new TextBox { Location = new Point(leftMargin + 210, currentY), Size = new Size(200, controlHeight), Font = new Font("Segoe UI", 9), Text = "Extra Copy" };
+            tabSignature.Controls.Add(txtCopy4Label);
+
+            UpdateExtraCopiesVisibility();
         }
-        
+
+        private void TxtCopy1Label_Leave(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(txtCopy1Label.Text))
+                txtCopy1Label.Text = "Original for Buyer";
+        }
+
+        private void ChkExtraCopies_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateExtraCopiesVisibility();
+        }
+
+        private void UpdateExtraCopiesVisibility()
+        {
+            bool enabled = chkExtraCopies.Checked;
+            chkPrintAllCopies.Enabled = enabled;
+            lblCopy2Label.Enabled = txtCopy2Label.Enabled = enabled;
+            lblCopy3Label.Enabled = txtCopy3Label.Enabled = enabled;
+            lblCopy4Label.Enabled = txtCopy4Label.Enabled = enabled;
+        }
+
+
         private void ChkShowPin_CheckedChanged(object sender, EventArgs e)
         {
             if (chkShowPin.Checked)
@@ -530,12 +643,11 @@ namespace DigiSign
                 numWidth.Value = decimal.Parse(fileNameLists[6].Element("FILENAME")?.Value ?? "150");
                 numHeight.Value = decimal.Parse(fileNameLists[7].Element("FILENAME")?.Value ?? "50");
                 
-                string signOnPage = fileNameLists[8].Element("FILENAME")?.Value ?? "L";
-                cmbSignOnPage.SelectedIndex = signOnPage == "F" ? 0 : signOnPage == "E" ? 1 : 2;
-                
+                // Index 8: reserved/unused (was Sign On Page) - kept only for positional compatibility
+
                 string openFolder = fileNameLists[9].Element("FILENAME")?.Value ?? "Y";
                 cmbOpenOutputFolder.SelectedIndex = openFolder == "Y" ? 0 : 1;
-                
+
                 if (fileNameLists.Count > 10)
                 {
                     string useSelfSigned = fileNameLists[10].Element("FILENAME")?.Value ?? "N";
@@ -545,6 +657,33 @@ namespace DigiSign
                 {
                     cmbUseSelfSigned.SelectedIndex = 1; // Default to No
                 }
+
+                if (fileNameLists.Count > 16)
+                {
+                    string copy1Label = fileNameLists[16].Element("FILENAME")?.Value;
+                    txtCopy1Label.Text = string.IsNullOrWhiteSpace(copy1Label) ? "Original for Buyer" : copy1Label;
+
+                    string extraCopiesFlag = fileNameLists[17].Element("FILENAME")?.Value ?? "N";
+                    chkExtraCopies.Checked = extraCopiesFlag.ToUpper() == "Y";
+
+                    string printAllFlag = fileNameLists[18].Element("FILENAME")?.Value ?? "N";
+                    chkPrintAllCopies.Checked = printAllFlag.ToUpper() == "Y";
+
+                    txtCopy2Label.Text = fileNameLists[19].Element("FILENAME")?.Value ?? "Duplicate for Transporter";
+                    txtCopy3Label.Text = fileNameLists[20].Element("FILENAME")?.Value ?? "Duplicate for Supplier";
+                    txtCopy4Label.Text = fileNameLists[21].Element("FILENAME")?.Value ?? "Extra Copy";
+
+                    numCopyX.Value = decimal.Parse(fileNameLists[22].Element("FILENAME")?.Value ?? "380");
+                    numCopyY.Value = decimal.Parse(fileNameLists[23].Element("FILENAME")?.Value ?? "730");
+                    numCopyWidth.Value = decimal.Parse(fileNameLists[24].Element("FILENAME")?.Value ?? "180");
+                    numCopyHeight.Value = decimal.Parse(fileNameLists[25].Element("FILENAME")?.Value ?? "35");
+                }
+                else
+                {
+                    LoadDefaultCopyLabelSettings();
+                }
+
+                UpdateExtraCopiesVisibility();
             }
             catch (Exception ex)
             {
@@ -568,11 +707,26 @@ namespace DigiSign
             numYCoord.Value = 75;
             numWidth.Value = 150;
             numHeight.Value = 50;
-            cmbSignOnPage.SelectedIndex = 2; // Last Page
             cmbOpenOutputFolder.SelectedIndex = 0; // Yes
             cmbUseSelfSigned.SelectedIndex = 1; // No
+            LoadDefaultCopyLabelSettings();
+            UpdateExtraCopiesVisibility();
         }
-        
+
+        private void LoadDefaultCopyLabelSettings()
+        {
+            txtCopy1Label.Text = "Original for Buyer";
+            chkExtraCopies.Checked = false;
+            chkPrintAllCopies.Checked = false;
+            txtCopy2Label.Text = "Duplicate for Transporter";
+            txtCopy3Label.Text = "Duplicate for Supplier";
+            txtCopy4Label.Text = "Extra Copy";
+            numCopyX.Value = 380;
+            numCopyY.Value = 730;
+            numCopyWidth.Value = 180;
+            numCopyHeight.Value = 35;
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             try
@@ -620,8 +774,8 @@ namespace DigiSign
                                 new XElement("FILENAME", numHeight.Value.ToString("0"))
                             ),
                             new XElement("FILENAMELIST",
-                                new XElement("FILENAME", cmbSignOnPage.SelectedIndex == 0 ? "F" : cmbSignOnPage.SelectedIndex == 1 ? "E" : "L"),
-                                new XComment(" SignOnPage F=FIRST Page, E=Each Page, L=Last Page, default value=L ")
+                                new XElement("FILENAME", "L"),
+                                new XComment(" Reserved/unused (was SignOnPage) - kept only for positional compatibility ")
                             ),
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", cmbOpenOutputFolder.SelectedIndex == 0 ? "Y" : "N"),
@@ -630,6 +784,47 @@ namespace DigiSign
                             new XElement("FILENAMELIST",
                                 new XElement("FILENAME", cmbUseSelfSigned.SelectedIndex == 0 ? "Y" : "N"),
                                 new XComment(" USESELFSIGNED ")
+                            ),
+                            new XElement("FILENAMELIST", new XElement("FILENAME", ""), new XComment(" Reserved (legacy appsettings.json migration slot) ")),
+                            new XElement("FILENAMELIST", new XElement("FILENAME", ""), new XComment(" Reserved (legacy appsettings.json migration slot) ")),
+                            new XElement("FILENAMELIST", new XElement("FILENAME", ""), new XComment(" Reserved (legacy appsettings.json migration slot) ")),
+                            new XElement("FILENAMELIST", new XElement("FILENAME", ""), new XComment(" Reserved (legacy appsettings.json migration slot) ")),
+                            new XElement("FILENAMELIST", new XElement("FILENAME", ""), new XComment(" Reserved (legacy appsettings.json migration slot) ")),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", string.IsNullOrWhiteSpace(txtCopy1Label.Text) ? "Original for Buyer" : txtCopy1Label.Text),
+                                new XComment(" Copy 1 label (mandatory) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", chkExtraCopies.Checked ? "Y" : "N"),
+                                new XComment(" ExtraCopiesEnabled ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", chkPrintAllCopies.Checked ? "Y" : "N"),
+                                new XComment(" PrintAllCopies ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", txtCopy2Label.Text),
+                                new XComment(" Copy 2 label (optional, blank = skip) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", txtCopy3Label.Text),
+                                new XComment(" Copy 3 label (optional, blank = skip) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", txtCopy4Label.Text),
+                                new XComment(" Copy 4 label (optional, blank = skip) ")
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", numCopyX.Value.ToString("0"))
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", numCopyY.Value.ToString("0"))
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", numCopyWidth.Value.ToString("0"))
+                            ),
+                            new XElement("FILENAMELIST",
+                                new XElement("FILENAME", numCopyHeight.Value.ToString("0"))
                             )
                         )
                     )

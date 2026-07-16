@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -212,7 +213,9 @@ namespace DigiSign
                 bool willSign = doSign && string.Equals(info.DocumentType, "invoice", StringComparison.OrdinalIgnoreCase);
 
                 string finalPath;
+                List<string> allOutputPaths;
                 bool signed = false;
+                bool printAllCopies = false;
 
                 if (willSign)
                 {
@@ -227,7 +230,19 @@ namespace DigiSign
                     }
 
                     var signatureConfig = new SignatureConfiguration(
-                        xmlData.XCoordinate, xmlData.YCoordinate, xmlData.Width, xmlData.Height, xmlData.SignOnPage);
+                        xmlData.XCoordinate, xmlData.YCoordinate, xmlData.Width, xmlData.Height)
+                    {
+                        Copy1Label = xmlData.Copy1Label,
+                        ExtraCopiesEnabled = xmlData.ExtraCopiesEnabled,
+                        PrintAllCopies = xmlData.PrintAllCopies,
+                        Copy2Label = xmlData.Copy2Label,
+                        Copy3Label = xmlData.Copy3Label,
+                        Copy4Label = xmlData.Copy4Label,
+                        CopyLabelX = xmlData.CopyLabelX,
+                        CopyLabelY = xmlData.CopyLabelY,
+                        CopyLabelWidth = xmlData.CopyLabelWidth,
+                        CopyLabelHeight = xmlData.CopyLabelHeight
+                    };
 
                     var result = BatchSigner.SignFiles(new[] { localFilePath }, xmlData.OutputFolderPath, xmlData.CommonName, xmlData.Pin, signatureConfig, xmlData,
                         new JobTrackingBatchSignProgress(jobId));
@@ -250,7 +265,9 @@ namespace DigiSign
                         return;
                     }
 
-                    finalPath = fileResult.OutputPath;
+                    allOutputPaths = fileResult.OutputPaths;
+                    finalPath = allOutputPaths[0];
+                    printAllCopies = signatureConfig.PrintAllCopies;
                     signed = true;
                     Logger.LogToPlf($"Token {token}: signed successfully", isError: false);
                 }
@@ -263,6 +280,7 @@ namespace DigiSign
                     string destPath = Path.Combine(xmlData.OutputFolderPath, Path.GetFileName(localFilePath));
                     File.Copy(localFilePath, destPath, overwrite: true);
                     finalPath = destPath;
+                    allOutputPaths = new List<string> { finalPath };
                     Logger.LogToPlf($"Token {token}: fetched (unsigned)", isError: false);
                 }
 
@@ -270,9 +288,13 @@ namespace DigiSign
                 if (doPrint)
                 {
                     JobTracker.UpdateStage(jobId, JobStage.Printing, $"Printing to {(string.IsNullOrWhiteSpace(printerName) ? "default printer" : printerName)}...");
+                    var pathsToPrint = printAllCopies ? allOutputPaths : new List<string> { finalPath };
                     try
                     {
-                        printService.Print(finalPath, printerName);
+                        foreach (var pathToPrint in pathsToPrint)
+                        {
+                            printService.Print(pathToPrint, printerName);
+                        }
                         printed = true;
                         Logger.LogToPlf($"Token {token}: printed successfully", isError: false);
                     }
@@ -295,6 +317,7 @@ namespace DigiSign
                     docType = info.DocumentType,
                     fileName = info.FileName,
                     outputPath = finalPath,
+                    outputPaths = allOutputPaths,
                     signed,
                     printed
                 });

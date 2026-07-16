@@ -12,39 +12,48 @@ namespace DigiSign
         public float YCoordinate { get; set; }
         public float Width { get; set; }
         public float Height { get; set; }
-        public string SignOnPage { get; set; } // F=First, E=Each, L=Last
 
-        public SignatureConfiguration(float x, float y, float width, float height, string signOnPage)
+        public string Copy1Label { get; set; } = "Original for Buyer";
+        public bool ExtraCopiesEnabled { get; set; }
+        public bool PrintAllCopies { get; set; }
+        public string Copy2Label { get; set; }
+        public string Copy3Label { get; set; }
+        public string Copy4Label { get; set; }
+
+        public float CopyLabelX { get; set; }
+        public float CopyLabelY { get; set; }
+        public float CopyLabelWidth { get; set; }
+        public float CopyLabelHeight { get; set; }
+
+        public SignatureConfiguration(float x, float y, float width, float height)
         {
             XCoordinate = x;
             YCoordinate = y;
             Width = width;
             Height = height;
-            SignOnPage = signOnPage ?? "L"; // Default to Last page
         }
 
         /// <summary>
-        /// Determines which pages should be signed based on SignOnPage setting
+        /// Returns the ordered list of copy labels that should actually be signed:
+        /// Copy 1 is always included (falling back to the default if blank); Copy 2-4
+        /// are included only when Extra Copies is enabled and their label isn't blank.
         /// </summary>
-        public List<int> GetPagesToSign(int totalPages)
+        public List<string> GetCopyLabelsToSign()
         {
-            var pagesToSign = new List<int>();
-
-            switch (SignOnPage?.ToUpper())
+            var labels = new List<string>
             {
-                case "F":
-                    pagesToSign.Add(1); // First page
-                    break;
-                case "E":
-                    pagesToSign.AddRange(Enumerable.Range(1, totalPages)); // Each page
-                    break;
-                case "L":
-                default:
-                    pagesToSign.Add(totalPages); // Last page
-                    break;
+                string.IsNullOrWhiteSpace(Copy1Label) ? "Original for Buyer" : Copy1Label.Trim()
+            };
+
+            if (ExtraCopiesEnabled)
+            {
+                labels.AddRange(
+                    new[] { Copy2Label, Copy3Label, Copy4Label }
+                        .Where(label => !string.IsNullOrWhiteSpace(label))
+                        .Select(label => label.Trim()));
             }
 
-            return pagesToSign;
+            return labels;
         }
     }
 }

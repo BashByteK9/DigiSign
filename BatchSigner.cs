@@ -10,7 +10,8 @@ namespace DigiSign
     {
         public string FileName { get; set; }
         public bool Success { get; set; }
-        public string OutputPath { get; set; }
+        public List<string> OutputPaths { get; set; } = new List<string>();
+        public string OutputPath => OutputPaths.Count > 0 ? OutputPaths[0] : null;
         public string Error { get; set; }
     }
 
@@ -23,7 +24,7 @@ namespace DigiSign
         public List<FileSignOutcome> FileResults { get; } = new List<FileSignOutcome>();
 
         public IEnumerable<string> SuccessfulOutputPaths =>
-            FileResults.Where(r => r.Success).Select(r => r.OutputPath);
+            FileResults.Where(r => r.Success).SelectMany(r => r.OutputPaths);
     }
 
     public interface IBatchSignProgress
@@ -91,7 +92,9 @@ namespace DigiSign
             {
                 string inputPath = validFiles[i];
                 string fileName = Path.GetFileName(inputPath);
-                string outputPath = Path.Combine(outputFolderPath, fileName);
+                string baseName = Path.GetFileNameWithoutExtension(fileName);
+                string extension = Path.GetExtension(fileName);
+                string primaryOutputPath = Path.Combine(outputFolderPath, fileName);
 
                 Logger.LogSeparator();
                 Logger.Info($"Processing PDF: {fileName}");
@@ -99,11 +102,24 @@ namespace DigiSign
 
                 try
                 {
-                    signatureService.SignPdf(inputPath, outputPath, cert, signatureConfig, pin, outputFolderPath);
+                    var copyLabels = signatureConfig.GetCopyLabelsToSign();
+                    var outputPaths = new List<string>();
+
+                    for (int copyIndex = 0; copyIndex < copyLabels.Count; copyIndex++)
+                    {
+                        string label = copyLabels[copyIndex];
+                        string copyOutputPath = copyIndex == 0
+                            ? primaryOutputPath
+                            : Path.Combine(outputFolderPath, $"{baseName} - {SanitizeForFileName(label)}{extension}");
+
+                        signatureService.SignPdf(inputPath, copyOutputPath, cert, signatureConfig, pin, outputFolderPath, label);
+                        outputPaths.Add(copyOutputPath);
+                    }
+
                     result.SuccessCount++;
-                    result.FileResults.Add(new FileSignOutcome { FileName = fileName, Success = true, OutputPath = outputPath });
-                    Logger.Info($"Successfully signed: {fileName}");
-                    progress.OnFileSuccess(i, validFiles.Count, fileName, outputPath);
+                    result.FileResults.Add(new FileSignOutcome { FileName = fileName, Success = true, OutputPaths = outputPaths });
+                    Logger.Info($"Successfully signed: {fileName} ({outputPaths.Count} copy(ies))");
+                    progress.OnFileSuccess(i, validFiles.Count, fileName, outputPaths[0]);
                 }
                 catch (Exception ex)
                 {
@@ -118,6 +134,16 @@ namespace DigiSign
             Logger.Info($"PDF signing completed - Success: {result.SuccessCount}, Failed: {result.FailCount}");
             progress.OnComplete(result);
             return result;
+        }
+
+        private static string SanitizeForFileName(string label)
+        {
+            string sanitized = label;
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                sanitized = sanitized.Replace(c, '_');
+            }
+            return sanitized;
         }
     }
 }

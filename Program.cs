@@ -24,12 +24,21 @@ namespace DigiSign
         public float YCoordinate { get; set; }
         public float Width { get; set; }
         public float Height { get; set; }
-        public string SignOnPage { get; set; } // F=First, E=Each, L=Last
         public string OpenOutputFolder { get; set; } // Y=Open, N=Not open
         public bool UseSelfSigned { get; set; } = false;
         public string SelfSignedPath { get; set; }
         public string SelfSignedPassword { get; set; }
 
+        public string Copy1Label { get; set; } = "Original for Buyer";
+        public bool ExtraCopiesEnabled { get; set; }
+        public bool PrintAllCopies { get; set; }
+        public string Copy2Label { get; set; } = "Duplicate for Transporter";
+        public string Copy3Label { get; set; } = "Duplicate for Supplier";
+        public string Copy4Label { get; set; } = "Extra Copy";
+        public float CopyLabelX { get; set; } = 380f;
+        public float CopyLabelY { get; set; } = 730f;
+        public float CopyLabelWidth { get; set; } = 180f;
+        public float CopyLabelHeight { get; set; } = 35f;
     }
 
     internal class Program
@@ -357,11 +366,9 @@ namespace DigiSign
                 float yCoord = xmlData.YCoordinate;
                 float width = xmlData.Width;
                 float height = xmlData.Height;
-                string signOnPage = xmlData.SignOnPage ?? "L"; // Default to Last page
                 string openOutputFolder = xmlData.OpenOutputFolder ?? "Y"; // Default to Yes
 
                 Logger.Debug($"Signature coordinates: X={xCoord}, Y={yCoord}, Width={width}, Height={height}");
-                Logger.Debug($"Sign on page: {signOnPage}");
 
                 if (isVerboseMode)
                 {
@@ -408,7 +415,19 @@ namespace DigiSign
                     }
 
                     // Create signature configuration
-                    var signatureConfig = new SignatureConfiguration(xCoord, yCoord, width, height, signOnPage);
+                    var signatureConfig = new SignatureConfiguration(xCoord, yCoord, width, height)
+                    {
+                        Copy1Label = xmlData.Copy1Label,
+                        ExtraCopiesEnabled = xmlData.ExtraCopiesEnabled,
+                        PrintAllCopies = xmlData.PrintAllCopies,
+                        Copy2Label = xmlData.Copy2Label,
+                        Copy3Label = xmlData.Copy3Label,
+                        Copy4Label = xmlData.Copy4Label,
+                        CopyLabelX = xmlData.CopyLabelX,
+                        CopyLabelY = xmlData.CopyLabelY,
+                        CopyLabelWidth = xmlData.CopyLabelWidth,
+                        CopyLabelHeight = xmlData.CopyLabelHeight
+                    };
                     IBatchSignProgress progress = isVerboseMode ? new VerboseBatchSignProgress(verboseForm) : null;
 
                     var result = BatchSigner.SignFiles(validPdfFiles, outputFolderPath, commonName, pin, signatureConfig, xmlData, progress);
@@ -868,8 +887,7 @@ namespace DigiSign
                 xmlData.Width = w;
                 xmlData.Height = h;
 
-                // 8: Sign on page
-                xmlData.SignOnPage = fileNameLists[8].Element("FILENAME")?.Value.Trim() ?? "L";
+                // 8: Reserved/unused (was Sign On Page) - kept only for positional compatibility
 
                 // 9: Open output folder
                 xmlData.OpenOutputFolder = fileNameLists[9].Element("FILENAME")?.Value.Trim() ?? "Y";
@@ -880,7 +898,33 @@ namespace DigiSign
                     string flag = fileNameLists[10].Element("FILENAME")?.Value.Trim().ToUpper();
                     xmlData.UseSelfSigned = (flag == "Y");
                 }
-                
+
+                // Optional indices 16-25: copy-label settings
+                if (fileNameLists.Count > 16)
+                {
+                    string copy1Label = fileNameLists[16].Element("FILENAME")?.Value.Trim();
+                    xmlData.Copy1Label = string.IsNullOrWhiteSpace(copy1Label) ? "Original for Buyer" : copy1Label;
+
+                    string extraCopiesFlag = fileNameLists[17].Element("FILENAME")?.Value.Trim().ToUpper();
+                    xmlData.ExtraCopiesEnabled = (extraCopiesFlag == "Y");
+
+                    string printAllFlag = fileNameLists[18].Element("FILENAME")?.Value.Trim().ToUpper();
+                    xmlData.PrintAllCopies = (printAllFlag == "Y");
+
+                    xmlData.Copy2Label = fileNameLists[19].Element("FILENAME")?.Value.Trim();
+                    xmlData.Copy3Label = fileNameLists[20].Element("FILENAME")?.Value.Trim();
+                    xmlData.Copy4Label = fileNameLists[21].Element("FILENAME")?.Value.Trim();
+
+                    if (float.TryParse(fileNameLists[22].Element("FILENAME")?.Value.Trim(), out float copyX))
+                        xmlData.CopyLabelX = copyX;
+                    if (float.TryParse(fileNameLists[23].Element("FILENAME")?.Value.Trim(), out float copyY))
+                        xmlData.CopyLabelY = copyY;
+                    if (float.TryParse(fileNameLists[24].Element("FILENAME")?.Value.Trim(), out float copyW))
+                        xmlData.CopyLabelWidth = copyW;
+                    if (float.TryParse(fileNameLists[25].Element("FILENAME")?.Value.Trim(), out float copyH))
+                        xmlData.CopyLabelHeight = copyH;
+                }
+
                 Logger.Info("XML configuration loaded successfully");
                 return xmlData;
             }

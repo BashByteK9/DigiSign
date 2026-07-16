@@ -196,7 +196,7 @@ namespace DigiSign
         /// Signs a PDF document with the provided certificate
         /// </summary>
         public void SignPdf(string inputPath, string outputPath, X509Certificate2 cert,
-            SignatureConfiguration config, string certPassword, string outputFolderPath)
+            SignatureConfiguration config, string certPassword, string outputFolderPath, string copyLabelText = null)
         {
             try
             {
@@ -212,10 +212,7 @@ namespace DigiSign
 
                 // Setup PDF reader
                 PdfReader reader = new PdfReader(inputPath);
-                int pageCount = reader.NumberOfPages;
-
-                // Determine which pages to sign
-                var pagesToSign = config.GetPagesToSign(pageCount);
+                const int page = 1; // Invoices are always single-page documents
 
                 using (FileStream os = new FileStream(outputPath, FileMode.Create))
                 {
@@ -225,34 +222,42 @@ namespace DigiSign
                     //appearance.Reason = "Digitally signed";
                     appearance.Acro6Layers = false;
 
-                    // Sign each specified page
-                    foreach (int page in pagesToSign)
-                    {
-                        iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
-                        float pageWidth = pageSize.Width;
-                        float pageHeight = pageSize.Height;
+                    iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
+                    float pageWidth = pageSize.Width;
+                    float pageHeight = pageSize.Height;
 
-                        // Validate and adjust coordinates
-                        var adjustedCoords = ValidateAndAdjustCoordinates(
-                            config.XCoordinate, config.YCoordinate,
-                            config.Width, config.Height,
+                    // Validate and adjust coordinates
+                    var adjustedCoords = ValidateAndAdjustCoordinates(
+                        config.XCoordinate, config.YCoordinate,
+                        config.Width, config.Height,
+                        pageWidth, pageHeight, page);
+
+                    // Define visible signature area
+                    appearance.SetVisibleSignature(
+                        new iTextSharp.text.Rectangle(
+                            adjustedCoords.X,
+                            adjustedCoords.Y,
+                            adjustedCoords.X + adjustedCoords.Width,
+                            adjustedCoords.Y + adjustedCoords.Height),
+                        page,
+                        $"sig_{page}");
+
+                    // Disable default Layer2 text to avoid double rendering
+                    appearance.Layer2Text = string.Empty;
+
+                    // Draw signature appearance
+                    DrawSignatureAppearance(stamper, page, adjustedCoords, cn, signatureText);
+
+                    // Draw the copy label (e.g. "Original for Buyer") before signing, so it's
+                    // part of the certified content rather than a post-certification alteration.
+                    if (!string.IsNullOrWhiteSpace(copyLabelText))
+                    {
+                        var labelCoords = ValidateAndAdjustCoordinates(
+                            config.CopyLabelX, config.CopyLabelY,
+                            config.CopyLabelWidth, config.CopyLabelHeight,
                             pageWidth, pageHeight, page);
 
-                        // Define visible signature area for the current page
-                        appearance.SetVisibleSignature(
-                            new iTextSharp.text.Rectangle(
-                                adjustedCoords.X,
-                                adjustedCoords.Y,
-                                adjustedCoords.X + adjustedCoords.Width,
-                                adjustedCoords.Y + adjustedCoords.Height),
-                            page,
-                            $"sig_{page}");
-
-                        // Disable default Layer2 text to avoid double rendering
-                        appearance.Layer2Text = string.Empty;
-
-                        // Draw signature appearance
-                        DrawSignatureAppearance(stamper, page, adjustedCoords, cn, signatureText);
+                        DrawCopyLabel(stamper, page, labelCoords, copyLabelText);
                     }
 
                     // Create signature with resilient TSA client
@@ -387,6 +392,37 @@ namespace DigiSign
                     over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, coords.X + padding, currentY, 0);
                     currentY -= leadingText;
                 }
+            }
+
+            over.EndText();
+            over.RestoreState();
+        }
+
+        private void DrawCopyLabel(PdfStamper stamper, int page,
+            (float X, float Y, float Width, float Height) coords, string labelText)
+        {
+            PdfContentByte over = stamper.GetOverContent(page);
+            over.SaveState();
+
+            BaseFont baseFont = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            float fontSize = 10;
+            float padding = 3;
+            float maxTextWidth = coords.Width - 2 * padding;
+            float leading = fontSize + 3;
+            float maxY = coords.Y + coords.Height - padding;
+            float minY = coords.Y + padding;
+            float currentY = maxY;
+
+            over.BeginText();
+            over.SetFontAndSize(baseFont, fontSize);
+            over.SetColorFill(BaseColor.BLACK);
+
+            List<string> wrappedLines = WrapText(labelText.Trim(), baseFont, fontSize, maxTextWidth);
+            foreach (string wrappedLine in wrappedLines)
+            {
+                if (currentY - leading < minY) break;
+                over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, coords.X + padding, currentY, 0);
+                currentY -= leading;
             }
 
             over.EndText();
