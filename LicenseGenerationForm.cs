@@ -61,6 +61,7 @@ namespace DigiSign
         private Label lblInvoiceApiKey;
         private TextBox txtInvoiceApiKey;
         private CheckBox chkShowApiKey;
+        private CheckBox chkNoAuthApi;
         private Label lblApiSettingsNote;
         private Label lblPrinterName;
         private ComboBox cmbPrinterName;
@@ -579,6 +580,17 @@ namespace DigiSign
             };
             chkShowApiKey.CheckedChanged += ChkShowApiKey_CheckedChanged;
             tabApiSettings.Controls.Add(chkShowApiKey);
+            currentY += 30;
+
+            chkNoAuthApi = new CheckBox
+            {
+                Text = "No Auth (API key not required)",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(300, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            chkNoAuthApi.CheckedChanged += ChkNoAuthApi_CheckedChanged;
+            tabApiSettings.Controls.Add(chkNoAuthApi);
             currentY += 40;
 
             // Batch Mode toggle
@@ -605,6 +617,8 @@ namespace DigiSign
             btnSaveApiSettings.FlatAppearance.BorderSize = 0;
             btnSaveApiSettings.Click += BtnSaveApiSettings_Click;
             tabApiSettings.Controls.Add(btnSaveApiSettings);
+
+            UpdateApiKeyEnabled();
         }
 
         private void CreateGeneralSettingsTab()
@@ -1300,6 +1314,19 @@ namespace DigiSign
             txtInvoiceApiKey.PasswordChar = chkShowApiKey.Checked ? '\0' : '*';
         }
 
+        private void ChkNoAuthApi_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateApiKeyEnabled();
+        }
+
+        private void UpdateApiKeyEnabled()
+        {
+            bool enabled = !chkNoAuthApi.Checked;
+            lblInvoiceApiKey.Enabled = enabled;
+            txtInvoiceApiKey.Enabled = enabled;
+            chkShowApiKey.Enabled = enabled;
+        }
+
         private void LoadSigningSettings()
         {
             try
@@ -1395,6 +1422,8 @@ namespace DigiSign
 
             txtInvoiceApiBaseUrl.Text = settings.InvoiceApiBaseUrl ?? "";
             txtInvoiceApiKey.Text = settings.InvoiceApiKey ?? "";
+            chkNoAuthApi.Checked = settings.NoAuthApi;
+            UpdateApiKeyEnabled();
             chkBatchMode.Checked = settings.LaunchInBatchMode;
 
             if (string.IsNullOrWhiteSpace(settings.PrinterName))
@@ -1457,6 +1486,8 @@ namespace DigiSign
             numListenerPort.Value = 8943;
             txtInvoiceApiBaseUrl.Text = "";
             txtInvoiceApiKey.Text = "";
+            chkNoAuthApi.Checked = false;
+            UpdateApiKeyEnabled();
             chkBatchMode.Checked = false; // Default to listener/tray mode
             cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
             chkEnableOcspCheck.Checked = true;
@@ -1573,6 +1604,7 @@ namespace DigiSign
                     Port = (int)numListenerPort.Value,
                     InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
                     InvoiceApiKey = txtInvoiceApiKey.Text,
+                    NoAuthApi = chkNoAuthApi.Checked,
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
@@ -1609,6 +1641,7 @@ namespace DigiSign
                     Port = (int)numListenerPort.Value,
                     InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
                     InvoiceApiKey = txtInvoiceApiKey.Text,
+                    NoAuthApi = chkNoAuthApi.Checked,
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""

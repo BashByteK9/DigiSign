@@ -46,6 +46,7 @@ namespace DigiSign
 
         private readonly string baseUrl;
         private readonly string apiKey;
+        private readonly bool noAuth;
 
         private class InvoiceFetchRequest
         {
@@ -63,10 +64,11 @@ namespace DigiSign
             public string SignedPdfBase64 { get; set; }
         }
 
-        public HttpDocumentDownloader(string baseUrl, string apiKey)
+        public HttpDocumentDownloader(string baseUrl, string apiKey, bool noAuth)
         {
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
+            this.noAuth = noAuth;
         }
 
         public byte[] FetchInvoiceDocument(string clientId, string tokenId)
@@ -82,7 +84,7 @@ namespace DigiSign
                 using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                 {
                     request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-                    if (!string.IsNullOrEmpty(apiKey))
+                    if (!noAuth && !string.IsNullOrEmpty(apiKey))
                         request.Headers.Add("X-Api-Key", apiKey); // TODO: confirm real auth header/scheme
 
                     var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
@@ -115,7 +117,7 @@ namespace DigiSign
                 using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                 {
                     request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-                    if (!string.IsNullOrEmpty(apiKey))
+                    if (!noAuth && !string.IsNullOrEmpty(apiKey))
                         request.Headers.Add("X-Api-Key", apiKey);
 
                     var response = httpClient.SendAsync(request).GetAwaiter().GetResult();

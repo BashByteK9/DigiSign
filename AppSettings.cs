@@ -6,6 +6,7 @@ namespace DigiSign
         public int Port { get; set; } = 8943;
         public string InvoiceApiBaseUrl { get; set; } = "";
         public string InvoiceApiKey { get; set; } = "";
+        public bool NoAuthApi { get; set; } = false;
         public bool LaunchInBatchMode { get; set; } = false;
         public string PrinterName { get; set; } = "";
         public bool EnableOcspCheck { get; set; } = true;
