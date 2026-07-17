@@ -39,6 +39,7 @@ namespace DigiSign
             listView.Columns.Add("Stage", 100);
             listView.Columns.Add("Progress", 220);
             listView.Columns.Add("Result", 60);
+            listView.Columns.Add("Callback", 100);
             listView.Columns.Add("Output / Error", 250);
             this.Controls.Add(listView);
 
@@ -66,6 +67,7 @@ namespace DigiSign
             {
                 string resultText = job.Success == null ? "..." : (job.Success.Value ? "OK" : "FAILED");
                 string outputOrError = job.Success == false ? job.ErrorMessage : job.OutputPath;
+                string callbackText = job.CallbackSuccess == null ? "-" : (job.CallbackSuccess.Value ? "OK" : $"FAILED: {job.CallbackMessage}");
 
                 var item = new ListViewItem(job.StartedAtUtc.ToLocalTime().ToString("HH:mm:ss"));
                 item.SubItems.Add(job.Route);
@@ -74,6 +76,7 @@ namespace DigiSign
                 item.SubItems.Add(job.Stage.ToString());
                 item.SubItems.Add(job.ProgressDetail ?? "");
                 item.SubItems.Add(resultText);
+                item.SubItems.Add(callbackText);
                 item.SubItems.Add(outputOrError ?? "");
 
                 if (job.Success == false)

@@ -678,7 +678,7 @@ namespace DigiSign
             }
 
             int port = appSettings.Port > 0 ? appSettings.Port : 8943;
-            var downloader = new HttpDocumentDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey, appSettings.NoAuthApi);
+            var downloader = new HttpDocumentDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey, appSettings.NoAuthApi, appSettings.IncludeSignedPdfInCallback, appSettings.InvoiceSignedCallbackUrl);
 
             using (var hostForm = new TrayHostForm())
             {

@@ -31,6 +31,8 @@ namespace DigiSign
         public bool? Success { get; set; }
         public string ErrorMessage { get; set; }
         public string OutputPath { get; set; }
+        public bool? CallbackSuccess { get; set; }
+        public string CallbackMessage { get; set; }
 
         // Insertion order, used for bounded eviction - not for display.
         internal long Sequence { get; set; }
@@ -113,6 +115,18 @@ namespace DigiSign
             }
         }
 
+        public static void SetCallbackResult(string jobId, bool success, string message)
+        {
+            if (jobs.TryGetValue(jobId, out var record))
+            {
+                lock (record)
+                {
+                    record.CallbackSuccess = success;
+                    record.CallbackMessage = message;
+                }
+            }
+        }
+
         public static List<JobRecord> Snapshot()
         {
             return jobs.Values
@@ -139,6 +153,8 @@ namespace DigiSign
                     Success = source.Success,
                     ErrorMessage = source.ErrorMessage,
                     OutputPath = source.OutputPath,
+                    CallbackSuccess = source.CallbackSuccess,
+                    CallbackMessage = source.CallbackMessage,
                     Sequence = source.Sequence
                 };
             }

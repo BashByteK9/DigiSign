@@ -354,11 +354,13 @@ namespace DigiSign
                 {
                     byte[] finalBytes = File.ReadAllBytes(finalPath);
                     downloader.PostSignedInvoiceCallback(clientId, tokenId, invoiceNo, finalBytes);
+                    JobTracker.SetCallbackResult(jobId, true, null);
                 }
                 catch (CallbackException ex)
                 {
                     Logger.Error($"[token={tokenId}] invoice-signed callback failed", ex);
                     Logger.LogToPlf($"Token {tokenId}: invoice-signed callback failed - {ex.Message}", isError: true);
+                    JobTracker.SetCallbackResult(jobId, false, ex.Message);
                 }
 
                 JobTracker.Complete(jobId, true, finalPath, null);

@@ -41,6 +41,8 @@ namespace DigiSign
         private Label lblOutputFolder;
         private TextBox txtOutputFolder;
         private Button btnBrowseOutput;
+        private Label lblTestInvoiceNo;
+        private TextBox txtTestInvoiceNo;
         private Label lblCommonName;
         private TextBox txtCommonName;
         private Label lblPin;
@@ -62,6 +64,9 @@ namespace DigiSign
         private TextBox txtInvoiceApiKey;
         private CheckBox chkShowApiKey;
         private CheckBox chkNoAuthApi;
+        private CheckBox chkIncludeSignedPdfInCallback;
+        private Label lblInvoiceSignedCallbackUrl;
+        private TextBox txtInvoiceSignedCallbackUrl;
         private Label lblApiSettingsNote;
         private Label lblPrinterName;
         private ComboBox cmbPrinterName;
@@ -460,6 +465,24 @@ namespace DigiSign
             btnSignPdf.Click += BtnSignPdf_Click;
             tabSettings.Controls.Add(btnSignPdf);
 
+            lblTestInvoiceNo = new Label
+            {
+                Text = "Test Invoice No:",
+                Location = new Point(160, 478),
+                Size = new Size(95, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabSettings.Controls.Add(lblTestInvoiceNo);
+
+            txtTestInvoiceNo = new TextBox
+            {
+                Location = new Point(258, 474),
+                Size = new Size(110, 24),
+                Font = new Font("Segoe UI", 9),
+                Text = GenerateRandomInvoiceNo()
+            };
+            tabSettings.Controls.Add(txtTestInvoiceNo);
+
             btnResetSettings = new Button
             {
                 Text = "Reset to Defaults",
@@ -592,6 +615,35 @@ namespace DigiSign
             chkNoAuthApi.CheckedChanged += ChkNoAuthApi_CheckedChanged;
             tabApiSettings.Controls.Add(chkNoAuthApi);
             currentY += 40;
+
+            chkIncludeSignedPdfInCallback = new CheckBox
+            {
+                Text = "Include signed PDF (base64) in signed-callback response",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(400, 20),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabApiSettings.Controls.Add(chkIncludeSignedPdfInCallback);
+            currentY += 40;
+
+            lblInvoiceSignedCallbackUrl = new Label
+            {
+                Text = "Signed-Callback Response URL (optional - blank = reuse the base URL above):",
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, labelHeight),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            tabApiSettings.Controls.Add(lblInvoiceSignedCallbackUrl);
+            currentY += labelHeight + 5;
+
+            txtInvoiceSignedCallbackUrl = new TextBox
+            {
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, textBoxHeight),
+                Font = new Font("Segoe UI", 9)
+            };
+            tabApiSettings.Controls.Add(txtInvoiceSignedCallbackUrl);
+            currentY += textBoxHeight + spacing + 10;
 
             // Batch Mode toggle
             chkBatchMode = new CheckBox
@@ -1424,6 +1476,8 @@ namespace DigiSign
             txtInvoiceApiKey.Text = settings.InvoiceApiKey ?? "";
             chkNoAuthApi.Checked = settings.NoAuthApi;
             UpdateApiKeyEnabled();
+            chkIncludeSignedPdfInCallback.Checked = settings.IncludeSignedPdfInCallback;
+            txtInvoiceSignedCallbackUrl.Text = settings.InvoiceSignedCallbackUrl ?? "";
             chkBatchMode.Checked = settings.LaunchInBatchMode;
 
             if (string.IsNullOrWhiteSpace(settings.PrinterName))
@@ -1488,6 +1542,8 @@ namespace DigiSign
             txtInvoiceApiKey.Text = "";
             chkNoAuthApi.Checked = false;
             UpdateApiKeyEnabled();
+            chkIncludeSignedPdfInCallback.Checked = true;
+            txtInvoiceSignedCallbackUrl.Text = "";
             chkBatchMode.Checked = false; // Default to listener/tray mode
             cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
             chkEnableOcspCheck.Checked = true;
@@ -1605,6 +1661,8 @@ namespace DigiSign
                     InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
                     InvoiceApiKey = txtInvoiceApiKey.Text,
                     NoAuthApi = chkNoAuthApi.Checked,
+                    IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
+                    InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
@@ -1642,6 +1700,8 @@ namespace DigiSign
                     InvoiceApiBaseUrl = txtInvoiceApiBaseUrl.Text,
                     InvoiceApiKey = txtInvoiceApiKey.Text,
                     NoAuthApi = chkNoAuthApi.Checked,
+                    IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
+                    InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
                     LaunchInBatchMode = chkBatchMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
@@ -2613,178 +2673,164 @@ namespace DigiSign
                     }
                 }
 
-                // Show SaveFileDialog for output
-                string defaultFileName = usingMockPdf 
-                    ? "signed_document.pdf" 
-                    : Path.GetFileNameWithoutExtension(inputPdfPath) + "_signed.pdf";
+                // Automatically name the output from the invoice number - no save-dialog prompt
+                string invoiceNo = string.IsNullOrWhiteSpace(txtTestInvoiceNo.Text)
+                    ? GenerateRandomInvoiceNo()
+                    : txtTestInvoiceNo.Text.Trim();
+                string outputFolder = string.IsNullOrWhiteSpace(txtOutputFolder.Text)
+                    ? Path.GetTempPath()
+                    : txtOutputFolder.Text;
+                Directory.CreateDirectory(outputFolder);
+                string safeFileName = string.Join("_", $"{invoiceNo}.pdf".Split(Path.GetInvalidFileNameChars()));
+                string outputPdfPath = Path.Combine(outputFolder, safeFileName);
 
-                using (SaveFileDialog saveDialog = new SaveFileDialog())
+                // Get certificate and signing parameters
+                string commonName = txtCommonName.Text;
+                string pin = txtPin.Text;
+
+                if (string.IsNullOrWhiteSpace(commonName))
                 {
-                    saveDialog.Title = "Save Signed PDF As";
-                    saveDialog.Filter = "PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*";
-                    saveDialog.DefaultExt = "pdf";
-                    saveDialog.FileName = defaultFileName;
-                    saveDialog.OverwritePrompt = true;
+                    MessageBox.Show(
+                        "Please enter a certificate Common Name in the General settings tab.",
+                        "Certificate Required",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
 
-                    if (saveDialog.ShowDialog() != DialogResult.OK)
-                    {
-                        // Clean up temp file if we created one
-                        if (usingMockPdf && inputPdfPath.StartsWith(Path.GetTempPath()))
-                            File.Delete(inputPdfPath);
-                        return;
-                    }
+                // Create signature configuration from current settings
+                var signatureConfig = new SignatureConfiguration(
+                    (float)numXCoord.Value,
+                    (float)numYCoord.Value,
+                    (float)numWidth.Value,
+                    (float)numHeight.Value)
+                {
+                    Copy1Label = txtCopy1Label.Text,
+                    ExtraCopiesEnabled = chkExtraCopies.Checked,
+                    PrintAllCopies = chkPrintAllCopies.Checked,
+                    Copy2Label = txtCopy2Label.Text,
+                    Copy3Label = txtCopy3Label.Text,
+                    Copy4Label = txtCopy4Label.Text,
+                    CopyLabelX = (float)numCopyX.Value,
+                    CopyLabelY = (float)numCopyY.Value,
+                    CopyLabelWidth = (float)numCopyWidth.Value,
+                    CopyLabelHeight = (float)numCopyHeight.Value
+                };
 
-                    string outputPdfPath = saveDialog.FileName;
+                // Load XML data for certificate fallback options
+                string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
+                var xmlData = ReadXmlDataFromForm();
 
-                    // Get certificate and signing parameters
-                    string commonName = txtCommonName.Text;
-                    string pin = txtPin.Text;
+                // Use DigitalSignatureService to sign
+                var signatureService = new DigitalSignatureService();
 
-                    if (string.IsNullOrWhiteSpace(commonName))
-                    {
-                        MessageBox.Show(
-                            "Please enter a certificate Common Name in the General settings tab.",
-                            "Certificate Required",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning);
-                        return;
-                    }
+                // Show progress
+                this.Cursor = Cursors.WaitCursor;
+                btnSignPdf.Enabled = false;
+                btnSignPdf.Text = "Signing...";
+                Application.DoEvents();
 
-                    // Create signature configuration from current settings
-                    var signatureConfig = new SignatureConfiguration(
-                        (float)numXCoord.Value,
-                        (float)numYCoord.Value,
-                        (float)numWidth.Value,
-                        (float)numHeight.Value)
-                    {
-                        Copy1Label = txtCopy1Label.Text,
-                        ExtraCopiesEnabled = chkExtraCopies.Checked,
-                        PrintAllCopies = chkPrintAllCopies.Checked,
-                        Copy2Label = txtCopy2Label.Text,
-                        Copy3Label = txtCopy3Label.Text,
-                        Copy4Label = txtCopy4Label.Text,
-                        CopyLabelX = (float)numCopyX.Value,
-                        CopyLabelY = (float)numCopyY.Value,
-                        CopyLabelWidth = (float)numCopyWidth.Value,
-                        CopyLabelHeight = (float)numCopyHeight.Value
-                    };
+                bool verboseMode = chkVerboseMode.Checked;
+                VerboseProgressForm verboseForm = null;
 
-                    // Load XML data for certificate fallback options
-                    string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
-                    var xmlData = ReadXmlDataFromForm();
-
-                    // Use DigitalSignatureService to sign
-                    var signatureService = new DigitalSignatureService();
-
-                    // Show progress
-                    this.Cursor = Cursors.WaitCursor;
-                    btnSignPdf.Enabled = false;
-                    btnSignPdf.Text = "Signing...";
+                if (verboseMode)
+                {
+                    verboseForm = new VerboseProgressForm();
+                    verboseForm.Show();
+                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
+                    verboseForm.AppendText($"{VersionInfo.TitleWithVersion} - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
+                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
+                    verboseForm.UpdateProgress(1, "Loading certificate...");
+                    verboseForm.AppendDetail($"Common Name: {commonName}");
                     Application.DoEvents();
+                }
 
-                    bool verboseMode = chkVerboseMode.Checked;
-                    VerboseProgressForm verboseForm = null;
+                try
+                {
+                    // Load certificate
+                    var cert = signatureService.LoadCertificate(commonName, pin, xmlData);
+
+                    if (cert == null)
+                    {
+                        if (verboseMode)
+                        {
+                            verboseForm.AppendError($"Certificate not found: {commonName}");
+                            verboseForm.ProcessingComplete(true, 1);
+                        }
+
+                        MessageBox.Show(
+                            $"Certificate '{commonName}' not found.\n\n" +
+                            "Please ensure:\n" +
+                            "1. USB token is connected (if using USB certificate)\n" +
+                            "2. Certificate Common Name is correct\n" +
+                            "3. Certificate is installed in Windows certificate store",
+                            "Certificate Not Found",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                        return;
+                    }
 
                     if (verboseMode)
                     {
-                        verboseForm = new VerboseProgressForm();
-                        verboseForm.Show();
-                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Gray, true);
-                        verboseForm.AppendText($"{VersionInfo.TitleWithVersion} - VERBOSE MODE\n", Color.FromArgb(0, 102, 204), true);
-                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n\n", Color.Gray, true);
-                        verboseForm.UpdateProgress(1, "Loading certificate...");
-                        verboseForm.AppendDetail($"Common Name: {commonName}");
+                        verboseForm.AppendSuccess("Certificate loaded");
+                        verboseForm.AppendDetail($"Subject: {cert.Subject}");
+                        verboseForm.AppendDetail($"Expiry: {cert.NotAfter:yyyy-MM-dd}");
+                        verboseForm.UpdateProgress(5, "Signing PDF...");
+                        verboseForm.AppendDetail($"Input: {Path.GetFileName(inputPdfPath)}");
+                        verboseForm.AppendDetail($"Output: {Path.GetFileName(outputPdfPath)}");
                         Application.DoEvents();
                     }
 
-                    try
+                    // Sign the PDF
+                    signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolder, signatureConfig.Copy1Label);
+
+                    if (verboseMode)
                     {
-                        // Load certificate
-                        var cert = signatureService.LoadCertificate(commonName, pin, xmlData);
-
-                        if (cert == null)
-                        {
-                            if (verboseMode)
-                            {
-                                verboseForm.AppendError($"Certificate not found: {commonName}");
-                                verboseForm.ProcessingComplete(true, 1);
-                            }
-
-                            MessageBox.Show(
-                                $"Certificate '{commonName}' not found.\n\n" +
-                                "Please ensure:\n" +
-                                "1. USB token is connected (if using USB certificate)\n" +
-                                "2. Certificate Common Name is correct\n" +
-                                "3. Certificate is installed in Windows certificate store",
-                                "Certificate Not Found",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Error);
-                            return;
-                        }
-
-                        if (verboseMode)
-                        {
-                            verboseForm.AppendSuccess("Certificate loaded");
-                            verboseForm.AppendDetail($"Subject: {cert.Subject}");
-                            verboseForm.AppendDetail($"Expiry: {cert.NotAfter:yyyy-MM-dd}");
-                            verboseForm.UpdateProgress(5, "Signing PDF...");
-                            verboseForm.AppendDetail($"Input: {Path.GetFileName(inputPdfPath)}");
-                            verboseForm.AppendDetail($"Output: {Path.GetFileName(outputPdfPath)}");
-                            Application.DoEvents();
-                        }
-
-                        // Sign the PDF
-                        string outputFolder = Path.GetDirectoryName(outputPdfPath);
-                        signatureService.SignPdf(inputPdfPath, outputPdfPath, cert, signatureConfig, pin, outputFolder, signatureConfig.Copy1Label);
-
-                        if (verboseMode)
-                        {
-                            verboseForm.AppendSuccess("PDF signed successfully");
-                            verboseForm.AppendDetail($"Saved to: {outputPdfPath}");
-                            verboseForm.ProcessingComplete(true, 0);
-                        }
-
-                        // Success
-                        MessageBox.Show(
-                            $"PDF signed successfully!\n\nSaved to:\n{outputPdfPath}",
-                            "Success",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-
-                        // Ask if user wants to open the folder
-                        DialogResult openFolder = MessageBox.Show(
-                            "Would you like to open the output folder?",
-                            "Open Folder",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Question);
-
-                        if (openFolder == DialogResult.Yes)
-                        {
-                            System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outputPdfPath}\"");
-                        }
+                        verboseForm.AppendSuccess("PDF signed successfully");
+                        verboseForm.AppendDetail($"Saved to: {outputPdfPath}");
+                        verboseForm.ProcessingComplete(true, 0);
                     }
-                    catch (Exception)
+
+                    // Success
+                    MessageBox.Show(
+                        $"PDF signed successfully!\n\nSaved to:\n{outputPdfPath}",
+                        "Success",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+
+                    // Ask if user wants to open the folder
+                    DialogResult openFolder = MessageBox.Show(
+                        "Would you like to open the output folder?",
+                        "Open Folder",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (openFolder == DialogResult.Yes)
                     {
-                        if (verboseMode)
-                        {
-                            verboseForm.AppendError("PDF signing failed - see error dialog for details");
-                            verboseForm.ProcessingComplete(true, 1);
-                        }
-                        throw;
+                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outputPdfPath}\"");
                     }
-                    finally
+                }
+                catch (Exception)
+                {
+                    if (verboseMode)
                     {
-                        // Clean up temp file if we created one
-                        if (usingMockPdf && inputPdfPath.StartsWith(Path.GetTempPath()) && File.Exists(inputPdfPath))
-                        {
-                            try { File.Delete(inputPdfPath); } catch { }
-                        }
-
-                        // Restore button state
-                        this.Cursor = Cursors.Default;
-                        btnSignPdf.Enabled = true;
-                        btnSignPdf.Text = "Sign PDF";
+                        verboseForm.AppendError("PDF signing failed - see error dialog for details");
+                        verboseForm.ProcessingComplete(true, 1);
                     }
+                    throw;
+                }
+                finally
+                {
+                    // Clean up temp file if we created one
+                    if (usingMockPdf && inputPdfPath.StartsWith(Path.GetTempPath()) && File.Exists(inputPdfPath))
+                    {
+                        try { File.Delete(inputPdfPath); } catch { }
+                    }
+
+                    // Restore button state
+                    this.Cursor = Cursors.Default;
+                    btnSignPdf.Enabled = true;
+                    btnSignPdf.Text = "Sign PDF";
                 }
             }
             catch (Exception ex)
@@ -2802,6 +2848,8 @@ namespace DigiSign
                 Logger.Error($"Error signing PDF from preview: {ex.Message}", ex);
             }
         }
+
+        private static string GenerateRandomInvoiceNo() => "TEST-" + new Random().Next(100000, 999999);
 
         private void CreateBlankPdf(string outputPath)
         {

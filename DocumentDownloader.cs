@@ -47,6 +47,8 @@ namespace DigiSign
         private readonly string baseUrl;
         private readonly string apiKey;
         private readonly bool noAuth;
+        private readonly bool includeSignedPdfInCallback;
+        private readonly string callbackBaseUrl;
 
         private class InvoiceFetchRequest
         {
@@ -64,11 +66,13 @@ namespace DigiSign
             public string SignedPdfBase64 { get; set; }
         }
 
-        public HttpDocumentDownloader(string baseUrl, string apiKey, bool noAuth)
+        public HttpDocumentDownloader(string baseUrl, string apiKey, bool noAuth, bool includeSignedPdfInCallback, string callbackBaseUrl = null)
         {
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
             this.noAuth = noAuth;
+            this.includeSignedPdfInCallback = includeSignedPdfInCallback;
+            this.callbackBaseUrl = callbackBaseUrl;
         }
 
         public byte[] FetchInvoiceDocument(string clientId, string tokenId)
@@ -100,17 +104,18 @@ namespace DigiSign
 
         public void PostSignedInvoiceCallback(string clientId, string tokenId, string invoiceNo, byte[] signedPdfBytes)
         {
-            if (string.IsNullOrWhiteSpace(baseUrl))
+            string effectiveBase = string.IsNullOrWhiteSpace(callbackBaseUrl) ? baseUrl : callbackBaseUrl;
+            if (string.IsNullOrWhiteSpace(effectiveBase))
                 throw new CallbackException("Invoice/Label API base URL is not configured. Set it under the API Settings tab.");
 
-            string url = $"{baseUrl.TrimEnd('/')}/invoice-signed/";
+            string url = $"{effectiveBase.TrimEnd('/')}/invoice-signed/";
             string json = JsonConvert.SerializeObject(new InvoiceSignedRequest
             {
                 ClientId = clientId,
                 TokenId = tokenId,
                 InvoiceNo = invoiceNo,
-                SignedPdfBase64 = Convert.ToBase64String(signedPdfBytes)
-            });
+                SignedPdfBase64 = includeSignedPdfInCallback ? Convert.ToBase64String(signedPdfBytes) : null
+            }, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
 
             try
             {

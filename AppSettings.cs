@@ -7,6 +7,8 @@ namespace DigiSign
         public string InvoiceApiBaseUrl { get; set; } = "";
         public string InvoiceApiKey { get; set; } = "";
         public bool NoAuthApi { get; set; } = false;
+        public bool IncludeSignedPdfInCallback { get; set; } = true;
+        public string InvoiceSignedCallbackUrl { get; set; } = "";
         public bool LaunchInBatchMode { get; set; } = false;
         public string PrinterName { get; set; } = "";
         public bool EnableOcspCheck { get; set; } = true;
