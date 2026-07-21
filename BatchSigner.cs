@@ -49,6 +49,25 @@ namespace DigiSign
         public void OnComplete(BatchSignResult result) { }
     }
 
+    /// <summary>Forwards every callback to each non-null inner progress - lets batch-signing report to both the verbose progress form and JobTracker at once.</summary>
+    public class CompositeBatchSignProgress : IBatchSignProgress
+    {
+        private readonly List<IBatchSignProgress> inner;
+
+        public CompositeBatchSignProgress(params IBatchSignProgress[] progresses)
+        {
+            inner = progresses.Where(p => p != null).ToList();
+        }
+
+        public void OnStart(int totalFiles) { foreach (var p in inner) p.OnStart(totalFiles); }
+        public void OnCertificateLoaded(X509Certificate2 cert) { foreach (var p in inner) p.OnCertificateLoaded(cert); }
+        public void OnCertificateNotFound(string commonName) { foreach (var p in inner) p.OnCertificateNotFound(commonName); }
+        public void OnFileStart(int index, int total, string fileName) { foreach (var p in inner) p.OnFileStart(index, total, fileName); }
+        public void OnFileSuccess(int index, int total, string fileName, string outputPath) { foreach (var p in inner) p.OnFileSuccess(index, total, fileName, outputPath); }
+        public void OnFileFailure(int index, int total, string fileName, Exception ex) { foreach (var p in inner) p.OnFileFailure(index, total, fileName, ex); }
+        public void OnComplete(BatchSignResult result) { foreach (var p in inner) p.OnComplete(result); }
+    }
+
     public static class BatchSigner
     {
         public static BatchSignResult SignFiles(

@@ -9,7 +9,7 @@ namespace DigiSign
         public bool NoAuthApi { get; set; } = false;
         public bool IncludeSignedPdfInCallback { get; set; } = true;
         public string InvoiceSignedCallbackUrl { get; set; } = "";
-        public bool LaunchInBatchMode { get; set; } = false;
+        public bool EnableListenerMode { get; set; } = false;
         public string PrinterName { get; set; } = "";
         public bool EnableOcspCheck { get; set; } = true;
         public int OcspTimeoutSeconds { get; set; } = 10;

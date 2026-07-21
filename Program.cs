@@ -11,6 +11,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Management;
 using System.Reflection;
+using System.Threading;
 
 namespace DigiSign
 {
@@ -70,20 +71,21 @@ namespace DigiSign
             // Check if admin mode or settings mode is requested FIRST (before verbose mode check)
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
             bool isSettingsMode = args.Length > 0 && args[0].Equals("/settings", StringComparison.OrdinalIgnoreCase);
+            bool isTrayCompanionMode = args.Length > 0 && args[0].Equals("/traycompanion", StringComparison.OrdinalIgnoreCase);
 
             // Read XML data (core signing fields) and appsettings.json (listener/API fields + toggles)
             var xmlData = ReadXmlData(xmlFilePath);
             var appSettings = AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath);
 
-            // No args: default to listener/tray mode unless the "launch in batch mode" toggle is set.
+            // No args: default to batch/signing mode unless the "enable listener mode" toggle is set.
             // Explicit "/listen" always forces listener mode regardless of the toggle.
             bool isListenMode = args.Length == 0
-                ? !appSettings.LaunchInBatchMode
+                ? appSettings.EnableListenerMode
                 : args[0].Equals("/listen", StringComparison.OrdinalIgnoreCase);
 
-            // Only enable verbose mode if NOT in admin mode, settings mode, or listen mode
-            // Admin mode, settings mode, and listen mode are not the batch PDF-signing flow
-            if (!isAdminMode && !isSettingsMode && !isListenMode)
+            // Only enable verbose mode if NOT in admin mode, settings mode, tray companion mode, or listen mode
+            // Admin mode, settings mode, tray companion mode, and listen mode are not the batch PDF-signing flow
+            if (!isAdminMode && !isSettingsMode && !isTrayCompanionMode && !isListenMode)
             {
                 // Check for verbose mode from command line OR from XML settings
                 bool cmdLineVerbose = args.Any(a => a.Equals("/verbose", StringComparison.OrdinalIgnoreCase));
@@ -135,11 +137,13 @@ namespace DigiSign
             }
             else
             {
-                // Admin mode, settings mode, or listen mode - verbose mode is not applicable
+                // Admin mode, settings mode, tray companion mode, or listen mode - verbose mode is not applicable
                 if (isAdminMode)
                     Logger.Info("Admin mode - verbose mode disabled");
                 else if (isSettingsMode)
                     Logger.Info("Settings mode - verbose mode disabled");
+                else if (isTrayCompanionMode)
+                    Logger.Info("Tray companion mode - verbose mode disabled");
                 else
                     Logger.Info("Listen mode - verbose mode disabled");
 
@@ -157,8 +161,20 @@ namespace DigiSign
                 // SETTINGS MODE: No license required - just show settings panel
                 Logger.Info("Settings mode requested - showing settings panel (no license required)");
 
-                // Show settings panel without license requirement
-                RunSettingsMode();
+                // Show settings panel without license requirement. Empty relaunch args means
+                // "no other mode was running" - a restart just relaunches with no args.
+                if (RunSettingsMode())
+                {
+                    Logger.Info("Restart requested from standalone Settings - relaunching");
+                    try
+                    {
+                        Process.Start(Application.ExecutablePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("Failed to relaunch DigiSign after settings restart", ex);
+                    }
+                }
                 return; // Exit after settings mode completes
             }
 
@@ -196,6 +212,15 @@ namespace DigiSign
                 return; // Exit after admin mode completes
             }
 
+            // TRAY COMPANION MODE: idle background tray icon only (self-spawned by batch mode
+            // when nothing else already owns the tray-presence slot) - no license required.
+            if (isTrayCompanionMode)
+            {
+                Logger.Info("Tray companion mode requested - showing idle tray icon only (no license required)");
+                RunTrayCompanionMode();
+                return;
+            }
+
             // LISTENER MODE: Tray/HTTP listener must run regardless of license validity -
             // license is checked per-request inside the listener instead of gating startup.
             if (isListenMode)
@@ -205,6 +230,30 @@ namespace DigiSign
             }
 
             // PDF SIGNING MODE: Requires user license (license.txt)
+            JobRecoveryService.RunStartupRecovery();
+            JobStore.Prune(TimeSpan.FromDays(30));
+
+            // Ensure a tray icon is present in the background even though this batch run itself
+            // will exit as soon as signing completes - spawn an idle companion process unless a
+            // listener or an existing companion already owns the tray-presence slot.
+            if (!TraySingleton.IsHeld())
+            {
+                try
+                {
+                    var companionStartInfo = new ProcessStartInfo(Application.ExecutablePath, "/traycompanion")
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    Process.Start(companionStartInfo);
+                    Logger.Info("Spawned tray companion process for background tray icon presence");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"Could not spawn tray companion process: {ex.Message}");
+                }
+            }
+
             Logger.LogSeparator();
             Logger.Info("Starting license validation for PDF signing");
 
@@ -430,7 +479,18 @@ namespace DigiSign
                         EnableOcspCheck = appSettings.EnableOcspCheck,
                         OcspTimeoutSeconds = appSettings.OcspTimeoutSeconds
                     };
-                    IBatchSignProgress progress = isVerboseMode ? new VerboseBatchSignProgress(verboseForm) : null;
+                    // Track each file as its own job (Source=Batch) so a crash mid-batch leaves resumable,
+                    // per-file checkpoints - the same shared model listener-mode jobs use.
+                    var jobIds = validPdfFiles
+                        .Select(file => JobTracker.CreateJob(
+                            token: null, route: null, clientId: null,
+                            invoiceNo: Path.GetFileNameWithoutExtension(file),
+                            source: JobSource.Batch, inputPath: file, doSign: true, doPrint: false).JobId)
+                        .ToList();
+
+                    IBatchSignProgress progress = new CompositeBatchSignProgress(
+                        isVerboseMode ? new VerboseBatchSignProgress(verboseForm) : null,
+                        new BatchModeJobTrackingProgress(jobIds));
 
                     var result = BatchSigner.SignFiles(validPdfFiles, outputFolderPath, commonName, pin, signatureConfig, xmlData, progress);
 
@@ -439,9 +499,20 @@ namespace DigiSign
                         Logger.Error(result.CertificateError);
                         Logger.LogToPlf(result.CertificateError, isError: true);
                         totalErrorCount++; // Count certificate not found error
+
+                        foreach (var jobId in jobIds)
+                            JobTracker.Complete(jobId, false, null, result.CertificateError);
                     }
                     else
                     {
+                        for (int i = 0; i < result.FileResults.Count && i < jobIds.Count; i++)
+                        {
+                            var fileResult = result.FileResults[i];
+                            JobTracker.Complete(jobIds[i], fileResult.Success,
+                                fileResult.Success ? fileResult.OutputPath : null,
+                                fileResult.Success ? null : fileResult.Error);
+                        }
+
                         // Store success info for PLF logging later (after verbose dialog closes)
                         hasSuccessfulSigning = result.SuccessCount > 0;
                         if (result.SuccessCount >= 1)
@@ -666,6 +737,9 @@ namespace DigiSign
             Logger.LogSeparator();
             Logger.Info("Listen mode requested - starting HTTP listener tray application");
 
+            JobRecoveryService.RunStartupRecovery();
+            JobStore.Prune(TimeSpan.FromDays(30));
+
             if (xmlData == null || string.IsNullOrEmpty(xmlData.CommonName) || string.IsNullOrEmpty(xmlData.OutputFolderPath))
             {
                 Logger.Error("Cannot start listen mode - IP.xml configuration invalid/missing (CommonName/OutputFolderPath required)");
@@ -680,6 +754,19 @@ namespace DigiSign
             int port = appSettings.Port > 0 ? appSettings.Port : 8943;
             var downloader = new HttpDocumentDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey, appSettings.NoAuthApi, appSettings.IncludeSignedPdfInCallback, appSettings.InvoiceSignedCallbackUrl);
 
+            // If an idle tray companion (spawned by a prior batch run) already owns the tray-presence
+            // slot, ask it to exit so the listener's own tray icon becomes the only one visible.
+            if (TraySingleton.IsHeld())
+            {
+                Logger.Info("A tray companion is already running - requesting it exit so the listener can take over the tray icon");
+                TraySingleton.RequestOtherInstanceExit();
+                for (int i = 0; i < 20 && TraySingleton.IsHeld(); i++)
+                    Thread.Sleep(100);
+            }
+            bool traySlotAcquired = TraySingleton.TryAcquire();
+            if (!traySlotAcquired)
+                Logger.Warning("Could not acquire the tray-presence slot - a duplicate tray icon may briefly be visible");
+
             using (var hostForm = new TrayHostForm())
             {
                 var listenerService = new HttpListenerService(port, xmlData, downloader, licensePath,
@@ -687,6 +774,9 @@ namespace DigiSign
                         MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))),
                     new PdfiumPrintService(), appSettings.PrinterName,
                     appSettings.EnableOcspCheck, appSettings.OcspTimeoutSeconds);
+
+                JobTracker.RegisterResumeHandler(JobSource.Listener, jobId => listenerService.ProcessResumedJob(jobId));
+                JobTracker.RegisterResumeHandler(JobSource.Batch, ResumeBatchJob);
 
                 try
                 {
@@ -700,48 +790,74 @@ namespace DigiSign
                         "DigiSign Listener",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
+                    if (traySlotAcquired)
+                        TraySingleton.Release();
                     return;
                 }
 
-                using (var trayIcon = new NotifyIcon())
+                JobsForm jobsForm = null;
+                Action showJobsForm = () =>
                 {
-                    StatusForm statusForm = null;
-
-                    var menu = new ContextMenuStrip();
-                    menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
-                    menu.Items.Add(new ToolStripSeparator());
-                    menu.Items.Add("Settings...", null, (s, e) => RunSettingsMode());
-                    menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                    if (jobsForm == null || jobsForm.IsDisposed)
                     {
-                        try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
-                        catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
-                    });
-                    menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+                        jobsForm = new JobsForm();
+                        jobsForm.Show();
+                    }
+                    else
+                    {
+                        jobsForm.Show();
+                        if (jobsForm.WindowState == FormWindowState.Minimized)
+                            jobsForm.WindowState = FormWindowState.Normal;
+                        jobsForm.BringToFront();
+                        jobsForm.Activate();
+                    }
+                };
 
-                    trayIcon.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
-                    trayIcon.Text = $"DigiSign Listener (port {port})";
-                    trayIcon.ContextMenuStrip = menu;
+                var menu = new ContextMenuStrip();
+                menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("View Job Status...", null, (s, e) => showJobsForm());
+                menu.Items.Add("Settings...", null, (s, e) =>
+                {
+                    if (RunSettingsMode())
+                    {
+                        Logger.Info("Restart requested from Settings - relaunching into listener mode");
+                        // Stop the listener before spawning the new process, so the port is free
+                        // before the relaunch tries to bind it (tray slot is released once via the
+                        // ApplicationExit handler below, when Application.Exit() unwinds Application.Run).
+                        listenerService.Stop();
+                        try
+                        {
+                            Process.Start(Application.ExecutablePath, "/listen");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Failed to relaunch DigiSign after settings restart", ex);
+                        }
+                        Application.Exit();
+                    }
+                });
+                menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                {
+                    try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
+                    catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
+                });
+                menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+
+                using (var trayIcon = BuildTrayIcon(menu, $"DigiSign Listener (port {port})"))
+                {
                     trayIcon.MouseClick += (s, e) =>
                     {
                         if (e.Button != MouseButtons.Left) return;
-
-                        if (statusForm == null || statusForm.IsDisposed)
-                        {
-                            statusForm = new StatusForm();
-                            statusForm.Show();
-                        }
-                        else
-                        {
-                            statusForm.Show();
-                            if (statusForm.WindowState == FormWindowState.Minimized)
-                                statusForm.WindowState = FormWindowState.Normal;
-                            statusForm.BringToFront();
-                            statusForm.Activate();
-                        }
+                        showJobsForm();
                     };
-                    trayIcon.Visible = true;
 
-                    Application.ApplicationExit += (s, e) => listenerService.Stop();
+                    Application.ApplicationExit += (s, e) =>
+                    {
+                        listenerService.Stop();
+                        if (traySlotAcquired)
+                            TraySingleton.Release();
+                    };
 
                     Logger.Info($"Listener running on http://localhost:{port}/ - waiting for requests");
                     Application.Run(hostForm);
@@ -753,19 +869,195 @@ namespace DigiSign
             Logger.Info("Listen mode exited");
         }
 
+        /// <summary>
+        /// Resume handler for JobSource.Batch jobs (JobTracker.RegisterResumeHandler) - serviced by
+        /// whichever tray/listener process happens to be alive at click-time, since the original batch
+        /// CLI invocation that created the job has already exited (its fire-and-forget contract with the
+        /// ERP caller is unaffected). Batch jobs never print/callback, so "signed" is their terminal state.
+        /// </summary>
+        private static void ResumeBatchJob(string jobId)
+        {
+            var job = JobTracker.GetJob(jobId);
+            if (job == null)
+            {
+                Logger.Error($"[batch job={jobId}] Job record not found - aborting resume");
+                return;
+            }
+
+            var currentProcess = Process.GetCurrentProcess();
+            JobTracker.SetOwner(jobId, currentProcess.Id, currentProcess.StartTime.ToUniversalTime());
+
+            if (job.CancellationRequested)
+            {
+                Logger.Info($"[batch job={jobId}] Cancelled before resume processing began");
+                JobTracker.Cancel(jobId);
+                return;
+            }
+
+            bool alreadySigned = job.PathsToPrint != null && job.PathsToPrint.Count > 0 && job.PathsToPrint.All(File.Exists);
+            if (alreadySigned)
+            {
+                Logger.Info($"[batch job={jobId}] Resuming - already signed, marking complete");
+                JobTracker.Complete(jobId, true, job.PathsToPrint[0], null);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(job.InputPath) || !File.Exists(job.InputPath))
+            {
+                Logger.Error($"[batch job={jobId}] Cannot resume - input file no longer exists: {job.InputPath}");
+                JobTracker.Complete(jobId, false, null, $"Input file no longer exists: {job.InputPath}");
+                return;
+            }
+
+            string xmlFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IP.xml");
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+            var xmlData = ReadXmlData(xmlFilePath);
+            var appSettings = AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath);
+
+            if (xmlData == null)
+            {
+                Logger.Error($"[batch job={jobId}] Cannot resume - IP.xml configuration invalid/missing");
+                JobTracker.Complete(jobId, false, null, "Cannot resume: IP.xml configuration invalid/missing");
+                return;
+            }
+
+            var signResult = SigningPipeline.SignSingleFile(
+                job.InputPath, xmlData, appSettings.EnableOcspCheck, appSettings.OcspTimeoutSeconds, licensePath,
+                out string licenseIssue, new BatchModeJobTrackingProgress(new List<string> { jobId }));
+
+            if (licenseIssue != null)
+            {
+                Logger.Error($"[batch job={jobId}] {licenseIssue}");
+                JobTracker.Complete(jobId, false, null, licenseIssue);
+                return;
+            }
+
+            if (!signResult.Success)
+            {
+                JobTracker.Complete(jobId, false, null, signResult.Error);
+                return;
+            }
+
+            JobTracker.SetSigned(jobId, wasSigned: true, signResult.OutputPaths, null);
+            JobTracker.Complete(jobId, true, signResult.OutputPaths[0], null);
+        }
+
+        /// <summary>Builds a visible <see cref="NotifyIcon"/> using DigiSign's embedded tray icon image.</summary>
+        private static NotifyIcon BuildTrayIcon(ContextMenuStrip menu, string tooltip)
+        {
+            return new NotifyIcon
+            {
+                Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png"),
+                Text = tooltip,
+                ContextMenuStrip = menu,
+                Visible = true
+            };
+        }
+
+        /// <summary>
+        /// Idle background tray-icon-only mode, self-spawned by batch-signing runs so a tray icon is
+        /// always present even though batch mode itself exits as soon as signing completes. Exits
+        /// immediately if something else (listener, or another companion) already owns the tray slot.
+        /// </summary>
+        static void RunTrayCompanionMode()
+        {
+            Logger.LogSeparator();
+            Logger.Info("Tray companion mode started - idle background tray icon only");
+
+            JobTracker.RegisterResumeHandler(JobSource.Batch, ResumeBatchJob);
+
+            JobRecoveryService.RunStartupRecovery();
+            JobStore.Prune(TimeSpan.FromDays(30));
+
+            if (!TraySingleton.TryAcquire())
+            {
+                Logger.Info("Tray companion exiting immediately - another tray icon is already running");
+                return;
+            }
+
+            using (var hostForm = new TrayHostForm())
+            {
+                JobsForm jobsForm = null;
+                Action showJobsForm = () =>
+                {
+                    if (jobsForm == null || jobsForm.IsDisposed)
+                    {
+                        jobsForm = new JobsForm();
+                        jobsForm.Show();
+                    }
+                    else
+                    {
+                        jobsForm.Show();
+                        if (jobsForm.WindowState == FormWindowState.Minimized)
+                            jobsForm.WindowState = FormWindowState.Normal;
+                        jobsForm.BringToFront();
+                        jobsForm.Activate();
+                    }
+                };
+
+                var menu = new ContextMenuStrip();
+                menu.Items.Add("DigiSign — idle (signing mode)").Enabled = false;
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("View Job Status...", null, (s, e) => showJobsForm());
+                menu.Items.Add("Settings...", null, (s, e) =>
+                {
+                    if (RunSettingsMode())
+                    {
+                        Logger.Info("Restart requested from Settings - relaunching into tray companion mode");
+                        try
+                        {
+                            Process.Start(Application.ExecutablePath, "/traycompanion");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Failed to relaunch DigiSign after settings restart", ex);
+                        }
+                        Application.Exit();
+                    }
+                });
+                menu.Items.Add("Open Logs Folder", null, (s, e) =>
+                {
+                    try { Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs")); }
+                    catch (Exception ex) { Logger.Warning($"Could not open logs folder: {ex.Message}"); }
+                });
+                menu.Items.Add("Exit", null, (s, e) => Application.Exit());
+
+                using (var trayIcon = BuildTrayIcon(menu, "DigiSign (signing mode)"))
+                {
+                    trayIcon.MouseClick += (s, e) =>
+                    {
+                        if (e.Button != MouseButtons.Left) return;
+                        showJobsForm();
+                    };
+
+                    Application.ApplicationExit += (s, e) => TraySingleton.Release();
+
+                    TraySingleton.WatchForExitRequest(() =>
+                        hostForm.BeginInvoke(new Action(() => Application.Exit())));
+
+                    Logger.Info("Tray companion running in background - waiting");
+                    Application.Run(hostForm);
+                }
+            }
+
+            Logger.Info("Tray companion exited");
+        }
+
         private static volatile bool settingsFormOpen = false;
 
-        static void RunSettingsMode()
+        /// <summary>Shows the Settings form. Returns true if the user clicked "Restart App" (caller relaunches into the mode it knows was previously running).</summary>
+        static bool RunSettingsMode()
         {
             if (settingsFormOpen)
             {
                 Logger.Debug("Settings form already open - ignoring duplicate request");
-                return;
+                return false;
             }
 
             // Settings mode - no license required
             Logger.Info("Entering settings mode - no license required");
             settingsFormOpen = true;
+            bool restartRequested = false;
 
             try
             {
@@ -776,6 +1068,7 @@ namespace DigiSign
                     Logger.Debug("Showing settings form");
                     form.ShowDialog();
                     Logger.Debug("Settings form closed");
+                    restartRequested = form.RestartRequested;
                 }
 
                 Logger.Info("Settings mode completed");
@@ -793,6 +1086,8 @@ namespace DigiSign
             {
                 settingsFormOpen = false;
             }
+
+            return restartRequested;
         }
 
         static string PromptForLicenseKeyPath()

@@ -49,7 +49,7 @@ namespace DigiSign
         private TextBox txtPin;
         private CheckBox chkShowPin;
         private CheckBox chkVerboseMode;
-        private CheckBox chkBatchMode;
+        private CheckBox chkEnableListenerMode;
         private CheckBox chkEnableOcspCheck;
         private Label lblOcspTimeoutSeconds;
         private NumericUpDown numOcspTimeoutSeconds;
@@ -150,10 +150,13 @@ namespace DigiSign
         // Bottom buttons
         private Button btnGenerate;
         private Button btnCancel;
-        
+
+        // Persistent restart-into-previous-mode button (settings-only mode)
+        private Button btnRestartApp;
+
         // XML file path
         private string xmlFilePath;
-        
+
         // Mode flags
         private bool settingsOnlyMode = false;
 
@@ -163,6 +166,7 @@ namespace DigiSign
         public string LicenseNumber { get; private set; }
         public DateTime ExpirationDate { get; private set; }
         public bool WasCancelled { get; private set; }
+        public bool RestartRequested { get; private set; }
 
         public LicenseGenerationForm(bool settingsOnly = false)
         {
@@ -180,8 +184,8 @@ namespace DigiSign
             this.Text = settingsOnlyMode 
                 ? $"{VersionInfo.TitleWithVersion} - Settings" 
                 : $"{VersionInfo.TitleWithVersion} - Admin Panel";
-            this.ClientSize = new Size(800, 650);
-            this.MinimumSize = new Size(800, 650);
+            this.ClientSize = settingsOnlyMode ? new Size(800, 700) : new Size(800, 650);
+            this.MinimumSize = settingsOnlyMode ? new Size(800, 700) : new Size(800, 650);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
@@ -239,6 +243,24 @@ namespace DigiSign
             if (settingsOnlyMode && tabControl.TabPages.Count > 0)
             {
                 tabControl.SelectedIndex = 0; // Settings tab is first when license tab is hidden
+            }
+
+            // Persistent "Restart App" button - only meaningful in settings-only mode, where there's a
+            // "previously running mode" to relaunch back into. Placed below the tab control (not inside
+            // any tab) so it's reachable regardless of which tab/sub-tab is focused.
+            if (settingsOnlyMode)
+            {
+                btnRestartApp = new Button
+                {
+                    Text = "Restart App",
+                    Size = new Size(150, 36),
+                    Location = new Point(this.ClientSize.Width - margin - 150, currentY + 570 + 14),
+                    Font = new Font("Segoe UI", 10),
+                    Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                    Enabled = false
+                };
+                btnRestartApp.Click += BtnRestartApp_Click;
+                this.Controls.Add(btnRestartApp);
             }
         }
         
@@ -521,7 +543,7 @@ namespace DigiSign
 
             lblApiSettingsNote = new Label
             {
-                Text = "Used only when running 'DigiSign.exe /listen'. The invoice/label download API is a placeholder - configure it once the real API is available.",
+                Text = "Used whenever DigiSign runs in listener mode - either via 'DigiSign.exe /listen', or by default when the checkbox below is enabled.",
                 Location = new Point(leftMargin, currentY),
                 Size = new Size(720, 40),
                 Font = new Font("Segoe UI", 9, FontStyle.Italic),
@@ -645,15 +667,15 @@ namespace DigiSign
             tabApiSettings.Controls.Add(txtInvoiceSignedCallbackUrl);
             currentY += textBoxHeight + spacing + 10;
 
-            // Batch Mode toggle
-            chkBatchMode = new CheckBox
+            // Listener Mode toggle
+            chkEnableListenerMode = new CheckBox
             {
-                Text = "Launch in batch signing mode (instead of listener/tray) when started with no arguments",
+                Text = "Run as background listener (tray + HTTP API) when started with no arguments",
                 Location = new Point(leftMargin, currentY),
                 Size = new Size(660, 20),
                 Font = new Font("Segoe UI", 9)
             };
-            tabApiSettings.Controls.Add(chkBatchMode);
+            tabApiSettings.Controls.Add(chkEnableListenerMode);
             currentY += 40;
 
             btnSaveApiSettings = new Button
@@ -1478,7 +1500,7 @@ namespace DigiSign
             UpdateApiKeyEnabled();
             chkIncludeSignedPdfInCallback.Checked = settings.IncludeSignedPdfInCallback;
             txtInvoiceSignedCallbackUrl.Text = settings.InvoiceSignedCallbackUrl ?? "";
-            chkBatchMode.Checked = settings.LaunchInBatchMode;
+            chkEnableListenerMode.Checked = settings.EnableListenerMode;
 
             if (string.IsNullOrWhiteSpace(settings.PrinterName))
             {
@@ -1544,7 +1566,7 @@ namespace DigiSign
             UpdateApiKeyEnabled();
             chkIncludeSignedPdfInCallback.Checked = true;
             txtInvoiceSignedCallbackUrl.Text = "";
-            chkBatchMode.Checked = false; // Default to listener/tray mode
+            chkEnableListenerMode.Checked = false; // Default to batch/signing mode
             cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
             chkEnableOcspCheck.Checked = true;
             numOcspTimeoutSeconds.Value = 10;
@@ -1663,13 +1685,16 @@ namespace DigiSign
                     NoAuthApi = chkNoAuthApi.Checked,
                     IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
                     InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
-                    LaunchInBatchMode = chkBatchMode.Checked,
+                    EnableListenerMode = chkEnableListenerMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
                         : cmbPrinterName.SelectedItem?.ToString() ?? "",
                     EnableOcspCheck = chkEnableOcspCheck.Checked,
                     OcspTimeoutSeconds = (int)numOcspTimeoutSeconds.Value
                 });
+
+                if (btnRestartApp != null)
+                    btnRestartApp.Enabled = true;
 
                 MessageBox.Show(
                     "Settings saved successfully!\n\nThe new settings will be used for PDF signing operations.",
@@ -1702,7 +1727,7 @@ namespace DigiSign
                     NoAuthApi = chkNoAuthApi.Checked,
                     IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
                     InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
-                    LaunchInBatchMode = chkBatchMode.Checked,
+                    EnableListenerMode = chkEnableListenerMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
                         : cmbPrinterName.SelectedItem?.ToString() ?? "",
@@ -1710,8 +1735,11 @@ namespace DigiSign
                     OcspTimeoutSeconds = (int)numOcspTimeoutSeconds.Value
                 });
 
+                if (btnRestartApp != null)
+                    btnRestartApp.Enabled = true;
+
                 MessageBox.Show(
-                    "API settings saved successfully!\n\nRestart the listener ('DigiSign.exe /listen') for changes to take effect.",
+                    "API settings saved successfully!\n\nUse \"Restart App\" below to apply them immediately, or restart the listener ('DigiSign.exe /listen') yourself.",
                     "Settings Saved",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -1847,6 +1875,21 @@ namespace DigiSign
         {
             WasCancelled = true;
             this.DialogResult = DialogResult.Cancel;
+            this.Close();
+        }
+
+        private void BtnRestartApp_Click(object sender, EventArgs e)
+        {
+            var confirm = MessageBox.Show(
+                "This will restart DigiSign so the saved settings take effect. Continue?",
+                "Restart App",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+                return;
+
+            RestartRequested = true;
             this.Close();
         }
         

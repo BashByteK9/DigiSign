@@ -16,21 +16,25 @@ DigiSign is a Windows Forms desktop app (.NET Framework 4.7.2, `net472`) that di
 
 ## Entry point and run modes
 
-Everything starts in [Program.cs](Program.cs) `Main()`, which branches on `args[0]` into four mutually exclusive modes:
+Everything starts in [Program.cs](Program.cs) `Main()`, which branches on `args[0]` into four user-facing mutually exclusive modes (plus one internal/hidden one):
 
 | Mode | Trigger | License required | Purpose |
 |---|---|---|---|
 | Admin | `/admin` | `admin.license` (admin license) | Opens `LicenseGenerationForm` so an operator can turn a customer's `license.key` into a `license.txt` |
 | Settings | `/settings` | none | Opens `LicenseGenerationForm(settingsOnly: true)` to edit `IP.xml` + `appsettings.json` |
-| Listener | `/listen`, or no args when `appsettings.json` → `LaunchInBatchMode` is `false` (the default) | none to start; checked per-request | Runs `HttpListenerService` + a tray icon (background/headless most of the time) |
-| Batch signing | no args when `LaunchInBatchMode` is `true`, or any other arg | `license.txt` (user license) | Reads `IP.xml`, signs the listed PDFs via `BatchSigner`, optionally opens the output folder |
+| Listener | `/listen`, or no args when `appsettings.json` → `EnableListenerMode` is `true` | none to start; checked per-request | Runs `HttpListenerService` + a tray icon (background/headless most of the time) |
+| Batch signing | no args when `EnableListenerMode` is `false` (the default), or any other arg | `license.txt` (user license) | Reads `IP.xml`, signs the listed PDFs via `BatchSigner`, optionally opens the output folder |
 
 `/verbose` (or `VerboseMode` in config) only applies to batch-signing mode and pops up `VerboseProgressForm` with live step-by-step progress, auto-closing when done.
+
+Batch-signing mode itself still exits the instant signing finishes (this is how the ERP invokes it — once per document), but a tray icon must always be present regardless of mode. To reconcile these, batch mode self-spawns a hidden `DigiSign.exe /traycompanion` process (idle tray icon only, no HTTP listener) whenever nothing already owns the tray-presence slot. `TraySingleton.cs` guards this with a system-wide named mutex (`Global\DigiSign_TrayPresence`) so exactly one tray icon exists at a time — listener mode and the companion both hold it for their lifetime, and either one will politely ask the other to exit (via a named `EventWaitHandle`) if it starts up and finds the slot already taken. `/traycompanion` is not a documented end-user switch.
+
+Settings (`/settings` mode) has a "Restart App" button that closes the settings form and relaunches `DigiSign.exe` back into whichever mode was running before Settings was opened (plain relaunch for the standalone case, or `/listen`/`/traycompanion` when opened from that mode's tray menu) — see `RunSettingsMode`'s bool return and `LicenseGenerationForm.RestartRequested`. It only enables after a successful Save in either settings tab.
 
 ## Two config files — don't confuse them
 
 - **IP.xml** — legacy config, written by an external ERP integration (Tally-style). It's a flat, *positional* list of `<FILENAMELIST><FILENAME>` entries parsed by index in `Program.ReadXmlData` — there are no named keys, so reordering entries breaks everything. Indices 0–10 hold: input file paths, output folder, certificate CommonName, PIN, signature X/Y/width/height, `SignOnPage` (F/E/L), `OpenOutputFolder` (Y/N), and an optional `USESELFSIGNED` flag (index 10).
-- **appsettings.json** — newer JSON config (via `AppSettingsLoader`) for listener-mode-only settings: `VerboseMode`, `Port` (default 8943), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `LaunchInBatchMode`, `PrinterName`. If this file is missing, `AppSettingsLoader` auto-migrates it once from legacy `IP.xml` indices 11–15 (in that same historical ERP scheme) and writes it out.
+- **appsettings.json** — newer JSON config (via `AppSettingsLoader`) for listener-mode-only settings: `VerboseMode`, `Port` (default 8943), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `EnableListenerMode`, `PrinterName`. If this file is missing, `AppSettingsLoader` auto-migrates it once from legacy `IP.xml` indices 11–15 (in that same historical ERP scheme) and writes it out. `EnableListenerMode` replaced the older, inverted `LaunchInBatchMode` flag — `AppSettingsLoader.Load` transparently migrates any on-disk file still using the old key (inverting its value) the first time it's loaded, preserving whatever mode the install was actually running before the upgrade.
 - Both files are edited together through the same `LicenseGenerationForm(settingsOnly: true)` UI (`/settings` mode) — it has separate tabs for the signing/XML fields vs. the listener/API fields.
 
 ## Licensing (two independent tiers)
@@ -44,7 +48,7 @@ Everything starts in [Program.cs](Program.cs) `Main()`, which branches on `args[
 [HttpListenerService.cs](HttpListenerService.cs) listens on `http://localhost:{port}/` and handles four routes — `POST /invoice`, `/invoice-print`, `/invoice-sign`, `/invoice-sign-print` — matched by regex with no token in the path. The ERP sends a JSON body: `{"ClientId": "...", "Tokens": [{"TokenId": "...", "InvoiceNo": "..."}, ...]}`, i.e. one request can batch multiple invoices for the same client.
 
 1. The request is validated synchronously (`ClientId` present, `Tokens` non-empty, every `TokenId` non-blank) — a bad batch gets an immediate `400` and no jobs are created.
-2. For a valid batch, `JobTracker.CreateJob` registers one in-memory job per `TokenId` (bounded ring buffer of the last 200, keyed by GUID) — `StatusForm` reads `JobTracker.Snapshot()` to show recent activity when the user left-clicks the tray icon.
+2. For a valid batch, `JobTracker.CreateJob` registers one job per `TokenId` (persisted to `logs/jobs/*.json`, bounded in-memory ring buffer of the last 200, keyed by GUID) — `JobsForm` reads `JobTracker.Snapshot()` to show recent activity (both listener and batch-signing jobs, with per-row Resume/Cancel) when the user left-clicks either the listener's or the tray companion's icon.
 3. The HTTP response is written immediately as `202` with the accepted job list — the ERP does not block on fetch/sign/print. Processing then happens on a background thread pool item, looping over the batch's tokens **sequentially** (not in parallel — hardware USB-token signing must not be hit concurrently across a batch; a `static SemaphoreSlim` additionally serializes the signing step across concurrent batches/requests).
 4. Per token: `IDocumentDownloader.FetchInvoiceDocument(clientId, tokenId)` (`HttpDocumentDownloader`) POSTs `{ClientId, TokenId}` to `{InvoiceApiBaseUrl}/invoice/` and gets raw PDF bytes back (no metadata/doctype from the server anymore) — see [DocumentDownloader.cs](DocumentDownloader.cs). A failure here is isolated: it fails just that token's job and logging, the batch continues with the next token.
 5. Signing only happens for `-sign` routes — there's no server-reported document type anymore to additionally gate on, so route alone decides.

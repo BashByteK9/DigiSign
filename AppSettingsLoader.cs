@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace DigiSign
 {
@@ -20,7 +21,27 @@ namespace DigiSign
                 try
                 {
                     string json = File.ReadAllText(appSettingsPath);
-                    return JsonConvert.DeserializeObject<AppSettings>(json) ?? new AppSettings();
+                    var jobj = JObject.Parse(json);
+
+                    // Back-compat: older appsettings.json files use "LaunchInBatchMode" (checked = batch).
+                    // Migrate it into "EnableListenerMode" (checked = listener) by inverting the value, so
+                    // an upgraded install preserves whatever mode the customer was actually running before -
+                    // this must be presence detection, not a value check, since a missing key and an
+                    // explicit "false" are different things and mixing them up would silently default
+                    // every upgrade to batch mode regardless of the customer's prior setting.
+                    if (jobj["LaunchInBatchMode"] != null && jobj["EnableListenerMode"] == null)
+                    {
+                        bool legacyBatchMode = jobj["LaunchInBatchMode"].Value<bool>();
+                        jobj["EnableListenerMode"] = !legacyBatchMode;
+                        jobj.Remove("LaunchInBatchMode");
+
+                        var migratedSettings = jobj.ToObject<AppSettings>() ?? new AppSettings();
+                        Save(migratedSettings, appSettingsPath);
+                        Logger.Info("Migrated legacy LaunchInBatchMode flag to EnableListenerMode (inverted) in appsettings.json");
+                        return migratedSettings;
+                    }
+
+                    return jobj.ToObject<AppSettings>() ?? new AppSettings();
                 }
                 catch (Exception ex)
                 {
@@ -68,8 +89,9 @@ namespace DigiSign
                 settings.InvoiceApiBaseUrl = fileNameLists[13].Element("FILENAME")?.Value?.Trim();
                 settings.InvoiceApiKey = fileNameLists[14].Element("FILENAME")?.Value?.Trim();
 
+                // Legacy flag encoded the old "batch mode" semantics ("Y" = batch) - invert for EnableListenerMode.
                 string batchFlag = fileNameLists[15].Element("FILENAME")?.Value?.Trim().ToUpper();
-                settings.LaunchInBatchMode = (batchFlag == "Y");
+                settings.EnableListenerMode = !(batchFlag == "Y");
 
                 return settings;
             }
