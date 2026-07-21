@@ -6,6 +6,7 @@ using System.Linq;
 using System.Xml.Linq;
 using PDFtoImage;
 using SkiaSharp;
+using iTextSharp.text.pdf;
 
 namespace DigiSign
 {
@@ -110,6 +111,7 @@ namespace DigiSign
         
         // Settings Tab - Preview
         private TabPage tabPreview;
+        private Panel previewPanel;
         private PictureBox picPreview;
         private Button btnRefreshPreview;
         private Button btnSignPdf;
@@ -121,18 +123,44 @@ namespace DigiSign
         private Button btnZoomReset;
         private float zoomLevel = 1.0f;
         
-        // Interactive signature placement
-        private bool isDraggingSignature = false;
-        private bool isResizingSignature = false;
+        // Interactive placement - generalized over multiple draggable/resizable boxes
+        // (currently: the signature box and the copy-label box)
+        private class DraggableBox
+        {
+            public string Id;
+            public NumericUpDown NumX, NumY, NumWidth, NumHeight;
+            public Func<string> Caption;
+            public Func<string> PreviewText;
+            public Color BorderColor;
+        }
+        private DraggableBox _signatureBox;
+        private DraggableBox _copyLabelBox;
+        private DraggableBox[] AllBoxes => new[] { _copyLabelBox, _signatureBox }; // draw order: signature on top
+        private DraggableBox[] HitTestOrder => new[] { _signatureBox, _copyLabelBox }; // signature wins on overlap
+
+        private DraggableBox activeBox;
+        private DraggableBox hoverBox;
+        private bool isDraggingBox = false;
+        private bool isResizingBox = false;
         private ResizeHandle activeResizeHandle = ResizeHandle.None;
         private Point lastMousePosition;
-        private RectangleF signatureRect;
         private const int HANDLE_SIZE = 8;
+
+        // Cached fonts used to draw box overlays, rebuilt only when zoomLevel changes
+        private float _overlayFontsScale = -1f;
+        private Font _overlayFontCN;
+        private Font _overlayFontText;
+        private Font _overlayFontLabel;
+        private BaseFont _previewBaseFontCN;
+
+        // Cache of the last rendered PDF/mock page background (boxes are drawn separately on top in Paint)
+        private Bitmap _cachedBackground;
+        private string _cachedBackgroundKey;
 
         // Store actual PDF dimensions for accurate resize handle positioning
         private float currentPdfWidth = 595f;  // Default to A4
         private float currentPdfHeight = 842f; // Default to A4
-        
+
         private enum ResizeHandle
         {
             None,
@@ -1062,6 +1090,7 @@ namespace DigiSign
                 Text = "Original for Buyer"
             };
             txtCopy1Label.Leave += TxtCopy1Label_Leave;
+            txtCopy1Label.TextChanged += PreviewSettings_Changed;
             tabSignature.Controls.Add(txtCopy1Label);
             currentY += controlHeight + spacing + 5;
 
@@ -1080,24 +1109,28 @@ namespace DigiSign
             lblCopyX = new Label { Text = "X Coordinate of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             tabSignature.Controls.Add(lblCopyX);
             numCopyX = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 0, Maximum = 10000, DecimalPlaces = 0 };
+            numCopyX.ValueChanged += PreviewSettings_Changed;
             tabSignature.Controls.Add(numCopyX);
             currentY += controlHeight + spacing + 5;
 
             lblCopyY = new Label { Text = "Y Coordinate of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             tabSignature.Controls.Add(lblCopyY);
             numCopyY = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 0, Maximum = 10000, DecimalPlaces = 0 };
+            numCopyY.ValueChanged += PreviewSettings_Changed;
             tabSignature.Controls.Add(numCopyY);
             currentY += controlHeight + spacing + 5;
 
             lblCopyWidth = new Label { Text = "Width of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             tabSignature.Controls.Add(lblCopyWidth);
             numCopyWidth = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 10, Maximum = 10000, DecimalPlaces = 0 };
+            numCopyWidth.ValueChanged += PreviewSettings_Changed;
             tabSignature.Controls.Add(numCopyWidth);
             currentY += controlHeight + spacing + 5;
 
             lblCopyHeight = new Label { Text = "Height of Label (pixels):", Location = new Point(leftMargin, currentY), Size = new Size(200, labelHeight), Font = new Font("Segoe UI", 9, FontStyle.Bold) };
             tabSignature.Controls.Add(lblCopyHeight);
             numCopyHeight = new NumericUpDown { Location = new Point(leftMargin + 210, currentY), Size = new Size(120, controlHeight), Font = new Font("Segoe UI", 9), Minimum = 10, Maximum = 10000, DecimalPlaces = 0 };
+            numCopyHeight.ValueChanged += PreviewSettings_Changed;
             tabSignature.Controls.Add(numCopyHeight);
             currentY += controlHeight + spacing + 15;
 
@@ -1174,7 +1207,7 @@ namespace DigiSign
             // Info label
             lblPreviewInfo = new Label
             {
-                Text = "Preview of signature placement (use mouse wheel to zoom)",
+                Text = "Preview of signature and copy-label placement (Ctrl+wheel to zoom, wheel to scroll)",
                 Location = new Point(leftMargin, currentY),
                 Size = new Size(660, 20),
                 Font = new Font("Segoe UI", 9, FontStyle.Italic),
@@ -1258,7 +1291,7 @@ namespace DigiSign
             currentY += 40;
             
             // Preview panel with scrollbars
-            Panel previewPanel = new Panel
+            previewPanel = new Panel
             {
                 Location = new Point(leftMargin, currentY),
                 Size = new Size(660, 320),
@@ -1283,22 +1316,51 @@ namespace DigiSign
             picPreview.MouseUp += PicPreview_MouseUp;
             picPreview.Paint += PicPreview_Paint;
             
-            // Enable mouse wheel zoom
+            // Enable mouse wheel zoom - only on picPreview; if unhandled (plain wheel, no Ctrl) the
+            // WM_MOUSEWHEEL message bubbles to previewPanel automatically, which then scrolls natively.
+            // (Previously this handler was ALSO subscribed on previewPanel, causing a double zoom-step
+            // per physical wheel notch.)
             picPreview.MouseWheel += PicPreview_MouseWheel;
-            previewPanel.MouseWheel += PicPreview_MouseWheel;
-            
+
             previewPanel.Controls.Add(picPreview);
-            
+
             // Add instruction label
             Label lblInstruction = new Label
             {
-                Text = "?? Tip: Drag the signature box to move it, drag corners/edges to resize",
+                Text = "?? Tip: drag either box to move it, drag corners/edges to resize. Blue = signature, green = copy label.",
                 Location = new Point(leftMargin, currentY + 330),
                 Size = new Size(660, 20),
                 Font = new Font("Segoe UI", 8, FontStyle.Italic),
                 ForeColor = Color.FromArgb(100, 100, 100)
             };
             tabPreview.Controls.Add(lblInstruction);
+
+            // Set up the two draggable/resizable overlay boxes sharing the same hit-test/drag/paint
+            // pipeline (see DraggableBox, HitTestBoxAt, DrawBoxOverlay). Both tabs' NumericUpDowns
+            // already exist at this point since CreateSignatureSettingsTab() runs before this method.
+            _signatureBox = new DraggableBox
+            {
+                Id = "signature",
+                NumX = numXCoord,
+                NumY = numYCoord,
+                NumWidth = numWidth,
+                NumHeight = numHeight,
+                Caption = () => "Signature",
+                BorderColor = Color.FromArgb(0, 120, 215) // blue
+            };
+            _copyLabelBox = new DraggableBox
+            {
+                Id = "copyLabel",
+                NumX = numCopyX,
+                NumY = numCopyY,
+                NumWidth = numCopyWidth,
+                NumHeight = numCopyHeight,
+                Caption = () => "Copy Label",
+                // Copies 2-4 share this exact same rectangle and differ only in text, so only Copy 1's
+                // text (the mandatory/representative one) is shown live in the preview.
+                PreviewText = () => string.IsNullOrWhiteSpace(txtCopy1Label.Text) ? "Original for Buyer" : txtCopy1Label.Text,
+                BorderColor = Color.FromArgb(0, 150, 60) // green
+            };
 
             // Initialize with blank preview
             UpdatePreview();
@@ -1895,154 +1957,217 @@ namespace DigiSign
         
         private void PreviewSettings_Changed(object sender, EventArgs e)
         {
-            // Update preview when settings change
+            // Box position/size or label text changed - the PDF background is unaffected,
+            // so just repaint the overlay instead of re-rendering the whole page (see PicPreview_Paint).
             if (tabControl.SelectedTab == tabSettings && tabSettingsControl.SelectedTab == tabPreview)
             {
-                UpdatePreview();
+                picPreview.Invalidate();
             }
         }
-        
+
+        private float ClampZoom(float zoom)
+        {
+            return Math.Max(0.25f, Math.Min(3.0f, zoom));
+        }
+
+        // Re-renders the background at newZoom while keeping the content under focalPointInPanelClientCoords
+        // (in previewPanel client coordinates) visually stationary.
+        private void ZoomAroundPoint(float newZoom, Point focalPointInPanelClientCoords)
+        {
+            newZoom = ClampZoom(newZoom);
+            float oldZoom = zoomLevel;
+            if (Math.Abs(newZoom - oldZoom) < 0.0001f)
+                return;
+
+            Point currentScroll = previewPanel.AutoScrollPosition; // getter returns a NEGATED offset
+            PointF contentPtBefore = new PointF(
+                focalPointInPanelClientCoords.X - currentScroll.X,
+                focalPointInPanelClientCoords.Y - currentScroll.Y);
+
+            zoomLevel = newZoom;
+            UpdatePreview(); // re-renders background at the new pixel size; picPreview (AutoSize) resizes accordingly
+
+            float ratio = newZoom / oldZoom;
+            PointF contentPtAfter = new PointF(contentPtBefore.X * ratio, contentPtBefore.Y * ratio);
+
+            int desiredScrollX = Math.Max(0, (int)(contentPtAfter.X - focalPointInPanelClientCoords.X));
+            int desiredScrollY = Math.Max(0, (int)(contentPtAfter.Y - focalPointInPanelClientCoords.Y));
+            previewPanel.AutoScrollPosition = new Point(desiredScrollX, desiredScrollY); // setter expects a POSITIVE offset
+        }
+
+        private Point PanelViewportCenter()
+        {
+            return new Point(previewPanel.ClientSize.Width / 2, previewPanel.ClientSize.Height / 2);
+        }
+
         private void BtnZoomIn_Click(object sender, EventArgs e)
         {
-            if (zoomLevel < 3.0f)
-            {
-                zoomLevel += 0.25f;
-                UpdatePreview();
-                UpdateZoomLabel();
-            }
+            ZoomAroundPoint(zoomLevel + 0.25f, PanelViewportCenter());
         }
-        
+
         private void BtnZoomOut_Click(object sender, EventArgs e)
         {
-            if (zoomLevel > 0.25f)
-            {
-                zoomLevel -= 0.25f;
-                UpdatePreview();
-                UpdateZoomLabel();
-            }
+            ZoomAroundPoint(zoomLevel - 0.25f, PanelViewportCenter());
         }
-        
+
         private void BtnZoomReset_Click(object sender, EventArgs e)
         {
-            zoomLevel = 1.0f;
-            UpdatePreview();
-            UpdateZoomLabel();
+            ZoomAroundPoint(1.0f, PanelViewportCenter());
         }
-        
+
         private void PicPreview_MouseWheel(object sender, MouseEventArgs e)
         {
-            // Zoom with mouse wheel
-            if (e.Delta > 0 && zoomLevel < 3.0f)
+            // Ctrl+wheel zooms (anchored on the cursor); plain wheel is left unhandled so the
+            // WM_MOUSEWHEEL message bubbles to previewPanel, whose native AutoScroll scrolls it.
+            if (Control.ModifierKeys.HasFlag(Keys.Control))
             {
-                zoomLevel += 0.1f;
+                float newZoom = zoomLevel + (e.Delta > 0 ? 0.1f : -0.1f);
+                Point focalPanelPt = previewPanel.PointToClient(picPreview.PointToScreen(e.Location));
+                ZoomAroundPoint(newZoom, focalPanelPt);
+
+                HandledMouseEventArgs handledArgs = e as HandledMouseEventArgs;
+                if (handledArgs != null)
+                    handledArgs.Handled = true;
             }
-            else if (e.Delta < 0 && zoomLevel > 0.25f)
-            {
-                zoomLevel -= 0.1f;
-            }
-            
-            UpdatePreview();
-            UpdateZoomLabel();
         }
-        
+
+        // Hit-tests both boxes at point p. Resize handles take priority over interior "Move" hits
+        // across both boxes (so a precise handle grab on either box always wins); when only interior
+        // hits are found, the signature box wins on overlap (HitTestOrder is signature-first).
+        private DraggableBox HitTestBoxAt(Point p, out ResizeHandle handle)
+        {
+            foreach (DraggableBox box in HitTestOrder)
+            {
+                ResizeHandle h = GetResizeHandleAtPoint(p, GetScreenRect(box));
+                if (h != ResizeHandle.None && h != ResizeHandle.Move)
+                {
+                    handle = h;
+                    return box;
+                }
+            }
+
+            foreach (DraggableBox box in HitTestOrder)
+            {
+                ResizeHandle h = GetResizeHandleAtPoint(p, GetScreenRect(box));
+                if (h == ResizeHandle.Move)
+                {
+                    handle = h;
+                    return box;
+                }
+            }
+
+            handle = ResizeHandle.None;
+            return null;
+        }
+
         private void PicPreview_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left)
                 return;
-            
-            // Get signature rectangle in screen coordinates
-            RectangleF sigRect = GetSignatureScreenRect();
-            
-            // Check if clicking on resize handle
-            ResizeHandle handle = GetResizeHandleAtPoint(e.Location, sigRect);
-            
-            if (handle != ResizeHandle.None)
+
+            ResizeHandle handle;
+            DraggableBox box = HitTestBoxAt(e.Location, out handle);
+
+            if (box != null && handle != ResizeHandle.None)
             {
+                activeBox = box;
                 if (handle == ResizeHandle.Move)
                 {
-                    isDraggingSignature = true;
-                    isResizingSignature = false;
+                    isDraggingBox = true;
+                    isResizingBox = false;
                 }
                 else
                 {
-                    isResizingSignature = true;
-                    isDraggingSignature = false;
+                    isResizingBox = true;
+                    isDraggingBox = false;
                     activeResizeHandle = handle;
                 }
-                
+
                 lastMousePosition = e.Location;
                 picPreview.Cursor = GetCursorForHandle(handle);
                 picPreview.Invalidate();
             }
         }
-        
+
         private void PicPreview_MouseMove(object sender, MouseEventArgs e)
         {
-            if (isDraggingSignature || isResizingSignature)
+            if (isDraggingBox || isResizingBox)
             {
                 // Calculate delta
                 int deltaX = e.X - lastMousePosition.X;
                 int deltaY = e.Y - lastMousePosition.Y;
-                
-                if (isDraggingSignature)
+
+                if (isDraggingBox)
                 {
-                    // Move signature
-                    UpdateSignaturePosition(deltaX, deltaY);
+                    MoveBox(activeBox, deltaX, deltaY);
                 }
-                else if (isResizingSignature)
+                else if (isResizingBox)
                 {
-                    // Resize signature
-                    ResizeSignature(deltaX, deltaY, activeResizeHandle);
+                    ResizeBox(activeBox, deltaX, deltaY, activeResizeHandle);
                 }
-                
+
                 lastMousePosition = e.Location;
-                picPreview.Invalidate(); // Trigger Paint event for visual feedback
+                picPreview.Invalidate(); // Overlay-only repaint - no PDF re-render, see PicPreview_Paint
             }
             else
             {
-                // Update cursor based on hover
-                RectangleF sigRect = GetSignatureScreenRect();
-                ResizeHandle handle = GetResizeHandleAtPoint(e.Location, sigRect);
+                // Update cursor + hover-highlighted box based on hover position
+                ResizeHandle handle;
+                DraggableBox box = HitTestBoxAt(e.Location, out handle);
                 picPreview.Cursor = GetCursorForHandle(handle);
+
+                DraggableBox newHover = handle != ResizeHandle.None ? box : null;
+                if (newHover != hoverBox)
+                {
+                    hoverBox = newHover;
+                    picPreview.Invalidate();
+                }
             }
         }
-        
+
         private void PicPreview_MouseUp(object sender, MouseEventArgs e)
         {
-            if (isDraggingSignature || isResizingSignature)
+            if (isDraggingBox || isResizingBox)
             {
-                isDraggingSignature = false;
-                isResizingSignature = false;
+                isDraggingBox = false;
+                isResizingBox = false;
                 activeResizeHandle = ResizeHandle.None;
-                
-                // Update the preview to refresh
-                UpdatePreview();
-                
+                activeBox = null;
+
                 picPreview.Cursor = Cursors.Hand;
+                picPreview.Invalidate(); // Box position/size changed, not the PDF background - overlay-only repaint
             }
         }
-        
+
         private void PicPreview_Paint(object sender, PaintEventArgs e)
         {
-            // Draw resize handles if dragging or resizing
-            if (isDraggingSignature || isResizingSignature)
+            // Overlays (box outline/text/caption) are drawn fresh every paint - during drag,
+            // on every numeric-field keystroke, and at rest - instead of being baked into the
+            // cached PDF background bitmap (see UpdatePreview/RenderPdfPageBackground).
+            foreach (DraggableBox box in AllBoxes)
             {
-                RectangleF sigRect = GetSignatureScreenRect();
-                DrawResizeHandles(e.Graphics, sigRect);
+                if (box != null)
+                    DrawBoxOverlay(e.Graphics, box, zoomLevel, currentPdfWidth, currentPdfHeight);
+            }
+
+            DraggableBox handleBox = activeBox ?? hoverBox;
+            if (handleBox != null)
+            {
+                DrawResizeHandles(e.Graphics, GetScreenRect(handleBox));
             }
         }
-        
-        private RectangleF GetSignatureScreenRect()
+
+        private RectangleF GetScreenRect(DraggableBox box)
         {
             // Use actual PDF dimensions instead of hardcoded values
             float pdfWidth = currentPdfWidth;
             float pdfHeight = currentPdfHeight;
 
-            // Get signature settings in PDF coordinates
-            float x = (float)numXCoord.Value;
-            float y = (float)numYCoord.Value;
-            float width = (float)numWidth.Value;
-            float height = (float)numHeight.Value;
+            // Get box settings in PDF coordinates
+            float x = (float)box.NumX.Value;
+            float y = (float)box.NumY.Value;
+            float width = (float)box.NumWidth.Value;
+            float height = (float)box.NumHeight.Value;
 
             // Apply zoom scale
             float scale = zoomLevel;
@@ -2055,7 +2180,7 @@ namespace DigiSign
 
             return new RectangleF(screenX, screenY, screenWidth, screenHeight);
         }
-        
+
         private ResizeHandle GetResizeHandleAtPoint(Point p, RectangleF rect)
         {
             int tolerance = HANDLE_SIZE / 2 + 2;
@@ -2115,84 +2240,82 @@ namespace DigiSign
             }
         }
         
-        private void UpdateSignaturePosition(int deltaX, int deltaY)
+        private void MoveBox(DraggableBox box, int deltaX, int deltaY)
         {
             // Convert screen delta to PDF delta
             float pdfDeltaX = deltaX / zoomLevel;
             float pdfDeltaY = -deltaY / zoomLevel; // Invert Y because PDF coords are bottom-up
-            
-            // Update X coordinate
-            decimal newX = numXCoord.Value + (decimal)pdfDeltaX;
-            newX = Math.Max(numXCoord.Minimum, Math.Min(numXCoord.Maximum, newX));
-            numXCoord.Value = newX;
-            
-            // Update Y coordinate
-            decimal newY = numYCoord.Value + (decimal)pdfDeltaY;
-            newY = Math.Max(numYCoord.Minimum, Math.Min(numYCoord.Maximum, newY));
-            numYCoord.Value = newY;
+
+            decimal newX = box.NumX.Value + (decimal)pdfDeltaX;
+            newX = Math.Max(box.NumX.Minimum, Math.Min(box.NumX.Maximum, newX));
+            box.NumX.Value = newX;
+
+            decimal newY = box.NumY.Value + (decimal)pdfDeltaY;
+            newY = Math.Max(box.NumY.Minimum, Math.Min(box.NumY.Maximum, newY));
+            box.NumY.Value = newY;
         }
-        
-        private void ResizeSignature(int deltaX, int deltaY, ResizeHandle handle)
+
+        private void ResizeBox(DraggableBox box, int deltaX, int deltaY, ResizeHandle handle)
         {
             // Convert screen delta to PDF delta
             float pdfDeltaX = deltaX / zoomLevel;
             float pdfDeltaY = -deltaY / zoomLevel; // Invert Y
-            
-            decimal currentX = numXCoord.Value;
-            decimal currentY = numYCoord.Value;
-            decimal currentWidth = numWidth.Value;
-            decimal currentHeight = numHeight.Value;
-            
+
+            decimal currentX = box.NumX.Value;
+            decimal currentY = box.NumY.Value;
+            decimal currentWidth = box.NumWidth.Value;
+            decimal currentHeight = box.NumHeight.Value;
+
             switch (handle)
             {
                 case ResizeHandle.TopLeft:
                     // Move top-left corner
-                    numXCoord.Value = Math.Max(numXCoord.Minimum, Math.Min(numXCoord.Maximum, currentX + (decimal)pdfDeltaX));
-                    numYCoord.Value = Math.Max(numYCoord.Minimum, Math.Min(numYCoord.Maximum, currentY + (decimal)pdfDeltaY));
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
+                    box.NumX.Value = Math.Max(box.NumX.Minimum, Math.Min(box.NumX.Maximum, currentX + (decimal)pdfDeltaX));
+                    box.NumY.Value = Math.Max(box.NumY.Minimum, Math.Min(box.NumY.Maximum, currentY + (decimal)pdfDeltaY));
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.TopRight:
                     // Move top-right corner
-                    numYCoord.Value = Math.Max(numYCoord.Minimum, Math.Min(numYCoord.Maximum, currentY + (decimal)pdfDeltaY));
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
+                    box.NumY.Value = Math.Max(box.NumY.Minimum, Math.Min(box.NumY.Maximum, currentY + (decimal)pdfDeltaY));
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.BottomLeft:
                     // Move bottom-left corner
-                    numXCoord.Value = Math.Max(numXCoord.Minimum, Math.Min(numXCoord.Maximum, currentX + (decimal)pdfDeltaX));
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
+                    box.NumX.Value = Math.Max(box.NumX.Minimum, Math.Min(box.NumX.Maximum, currentX + (decimal)pdfDeltaX));
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.BottomRight:
                     // Move bottom-right corner
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.Top:
-                    numYCoord.Value = Math.Max(numYCoord.Minimum, Math.Min(numYCoord.Maximum, currentY + (decimal)pdfDeltaY));
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
+                    box.NumY.Value = Math.Max(box.NumY.Minimum, Math.Min(box.NumY.Maximum, currentY + (decimal)pdfDeltaY));
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight - (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.Bottom:
-                    numHeight.Value = Math.Max(numHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
+                    box.NumHeight.Value = Math.Max(box.NumHeight.Minimum, currentHeight + (decimal)pdfDeltaY);
                     break;
-                    
+
                 case ResizeHandle.Left:
-                    numXCoord.Value = Math.Max(numXCoord.Minimum, Math.Min(numXCoord.Maximum, currentX + (decimal)pdfDeltaX));
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
+                    box.NumX.Value = Math.Max(box.NumX.Minimum, Math.Min(box.NumX.Maximum, currentX + (decimal)pdfDeltaX));
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth - (decimal)pdfDeltaX);
                     break;
-                    
+
                 case ResizeHandle.Right:
-                    numWidth.Value = Math.Max(numWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
+                    box.NumWidth.Value = Math.Max(box.NumWidth.Minimum, currentWidth + (decimal)pdfDeltaX);
                     break;
             }
         }
-        
+
         private void DrawResizeHandles(Graphics g, RectangleF rect)
         {
             // Draw handles at corners and edges
@@ -2226,74 +2349,92 @@ namespace DigiSign
             lblZoom.Text = $"Zoom: {(int)(zoomLevel * 100)}%";
         }
         
+        // Computes a cache key for the rendered background so drag/keystroke overlay repaints
+        // (which call picPreview.Invalidate(), not this method) never trigger a PDF re-decode.
+        private string ComputeBackgroundCacheKey(string inputPdf, int pageNumber)
+        {
+            string fileStamp;
+            if (!string.IsNullOrEmpty(inputPdf) && File.Exists(inputPdf))
+            {
+                fileStamp = inputPdf + "|" + File.GetLastWriteTimeUtc(inputPdf).Ticks;
+            }
+            else
+            {
+                fileStamp = "mock";
+            }
+            return $"{fileStamp}|{pageNumber}|{Math.Round(zoomLevel, 2)}";
+        }
+
         private void UpdatePreview()
         {
             try
             {
                 // Get current page to preview
                 int pageNumber = cmbPreviewPage.SelectedIndex + 1;
-                
+
                 // Get input PDF from General settings tab
                 string inputPdf = txtInputFile.Text;
-                Bitmap previewBitmap = null;
-                bool usedMockPdf = false;
-                
-                // Try to load the PDF from General settings
-                if (!string.IsNullOrEmpty(inputPdf))
+                string key = ComputeBackgroundCacheKey(inputPdf, pageNumber);
+
+                if (key != _cachedBackgroundKey || _cachedBackground == null)
                 {
-                    // Check if file exists
-                    if (File.Exists(inputPdf))
+                    Bitmap newBackground;
+
+                    // Try to load the PDF from General settings
+                    if (!string.IsNullOrEmpty(inputPdf))
                     {
-                        try
+                        // Check if file exists
+                        if (File.Exists(inputPdf))
                         {
-                            // Try to load actual PDF
-                            previewBitmap = RenderPdfPageWithSignature(inputPdf, pageNumber);
-                            usedMockPdf = false;
-                            
-                            // Success - update info label
-                            lblPreviewInfo.Text = $"Preview: {Path.GetFileName(inputPdf)} (use mouse wheel to zoom)";
-                            lblPreviewInfo.ForeColor = Color.FromArgb(64, 64, 64);
+                            try
+                            {
+                                // Try to load actual PDF
+                                newBackground = RenderPdfPageBackground(inputPdf, pageNumber);
+
+                                // Success - update info label
+                                lblPreviewInfo.Text = $"Preview: {Path.GetFileName(inputPdf)} (Ctrl+wheel to zoom, wheel to scroll)";
+                                lblPreviewInfo.ForeColor = Color.FromArgb(64, 64, 64);
+                            }
+                            catch (Exception ex)
+                            {
+                                // If PDF is invalid, fall back to mock PDF
+                                newBackground = CreateMockPdfPreview();
+
+                                // Update info label to show error
+                                lblPreviewInfo.Text = $"? Cannot read PDF file. Using mock preview. Error: {ex.Message}";
+                                lblPreviewInfo.ForeColor = Color.Red;
+                            }
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            // If PDF is invalid, fall back to mock PDF
-                            previewBitmap = CreateMockPdfPreview();
-                            usedMockPdf = true;
-                            
-                            // Update info label to show error
-                            lblPreviewInfo.Text = $"? Cannot read PDF file. Using mock preview. Error: {ex.Message}";
-                            lblPreviewInfo.ForeColor = Color.Red;
+                            // File doesn't exist - use mock PDF
+                            newBackground = CreateMockPdfPreview();
+
+                            lblPreviewInfo.Text = $"? File not found: {Path.GetFileName(inputPdf)}. Using mock preview.";
+                            lblPreviewInfo.ForeColor = Color.Orange;
                         }
                     }
                     else
                     {
-                        // File doesn't exist - use mock PDF
-                        previewBitmap = CreateMockPdfPreview();
-                        usedMockPdf = true;
-                        
-                        lblPreviewInfo.Text = $"? File not found: {Path.GetFileName(inputPdf)}. Using mock preview.";
-                        lblPreviewInfo.ForeColor = Color.Orange;
+                        // No file selected - use mock PDF
+                        newBackground = CreateMockPdfPreview();
+
+                        lblPreviewInfo.Text = "No input file selected. Using mock preview (Ctrl+wheel to zoom, wheel to scroll)";
+                        lblPreviewInfo.ForeColor = Color.FromArgb(64, 64, 64);
                     }
+
+                    // Replace the cached background (boxes are drawn separately, live, in PicPreview_Paint)
+                    if (_cachedBackground != null)
+                    {
+                        _cachedBackground.Dispose();
+                    }
+                    _cachedBackground = newBackground;
+                    _cachedBackgroundKey = key;
+                    picPreview.Image = _cachedBackground;
                 }
-                else
-                {
-                    // No file selected - use mock PDF
-                    previewBitmap = CreateMockPdfPreview();
-                    usedMockPdf = true;
-                    
-                    lblPreviewInfo.Text = "No input file selected. Using mock preview (use mouse wheel to zoom)";
-                    lblPreviewInfo.ForeColor = Color.FromArgb(64, 64, 64);
-                }
-                
-                // Display in picture box
-                if (picPreview.Image != null)
-                {
-                    picPreview.Image.Dispose();
-                }
-                picPreview.Image = previewBitmap;
-                
-                // Update zoom label
+
                 UpdateZoomLabel();
+                picPreview.Invalidate();
             }
             catch (Exception ex)
             {
@@ -2304,75 +2445,75 @@ namespace DigiSign
                     g.Clear(Color.White);
                     using (Font font = new Font("Segoe UI", 9))
                     {
-                        g.DrawString($"Error generating preview:\n{ex.Message}\n\nStack Trace:\n{ex.StackTrace}", 
+                        g.DrawString($"Error generating preview:\n{ex.Message}\n\nStack Trace:\n{ex.StackTrace}",
                             font, Brushes.Red, new RectangleF(10, 10, 640, 300));
                     }
                 }
-                
-                if (picPreview.Image != null)
+
+                if (_cachedBackground != null)
                 {
-                    picPreview.Image.Dispose();
+                    _cachedBackground.Dispose();
                 }
+                _cachedBackground = errorBitmap;
+                _cachedBackgroundKey = null;
                 picPreview.Image = errorBitmap;
-                
+
                 lblPreviewInfo.Text = "? Error generating preview";
                 lblPreviewInfo.ForeColor = Color.Red;
             }
         }
-        
-        private Bitmap RenderPdfPageWithSignature(string pdfPath, int pageNumber)
+
+        private Bitmap RenderPdfPageBackground(string pdfPath, int pageNumber)
         {
-            // Base size for A4 at 72 DPI
-            int baseWidth = 595;
-            int baseHeight = 842;
-            
-            // Apply zoom
-            int width = (int)(baseWidth * zoomLevel);
-            int height = (int)(baseHeight * zoomLevel);
-            
+            // Use PDFtoImage (PDFium + SkiaSharp) to render actual PDF content
+            byte[] pdfBytes = File.ReadAllBytes(pdfPath);
+
+            // Update page count in combo box if needed
+            int totalPages = Conversion.GetPageCount(pdfBytes);
+            if (cmbPreviewPage.Items.Count != totalPages)
+            {
+                int selectedIndex = cmbPreviewPage.SelectedIndex;
+                cmbPreviewPage.Items.Clear();
+                for (int i = 1; i <= totalPages; i++)
+                {
+                    cmbPreviewPage.Items.Add($"Page {i}");
+                }
+                cmbPreviewPage.SelectedIndex = Math.Min(selectedIndex, totalPages - 1);
+            }
+
+            // Ensure page number is valid
+            if (pageNumber > totalPages)
+            {
+                pageNumber = totalPages;
+            }
+
+            // Get the REAL page size before allocating the bitmap, so the bitmap is sized to the
+            // page's actual aspect ratio instead of a hardcoded A4 box (previously caused stretching
+            // on any non-A4 page).
+            SizeF pdfPageSize = Conversion.GetPageSize(pdfBytes, pageNumber - 1);
+            float pdfWidth = pdfPageSize.Width;
+            float pdfHeight = pdfPageSize.Height;
+
+            // Store actual PDF dimensions for resize handle / overlay positioning
+            currentPdfWidth = pdfWidth;
+            currentPdfHeight = pdfHeight;
+
+            int width = Math.Max(1, (int)(pdfWidth * zoomLevel));
+            int height = Math.Max(1, (int)(pdfHeight * zoomLevel));
+
             // Create a bitmap to render the PDF page
             Bitmap bitmap = new Bitmap(width, height);
-            
+            bitmap.SetResolution(72f, 72f); // 1 PDF point == 1 pixel at zoom 1.0, matching the box/text layout math below
+
             using (Graphics g = Graphics.FromImage(bitmap))
             {
                 g.Clear(Color.White);
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                
+
                 try
                 {
-                    // Use PDFtoImage (PDFium + SkiaSharp) to render actual PDF content
-                    byte[] pdfBytes = File.ReadAllBytes(pdfPath);
-
-                    // Update page count in combo box if needed
-                    int totalPages = Conversion.GetPageCount(pdfBytes);
-                    if (cmbPreviewPage.Items.Count != totalPages)
-                    {
-                        int selectedIndex = cmbPreviewPage.SelectedIndex;
-                        cmbPreviewPage.Items.Clear();
-                        for (int i = 1; i <= totalPages; i++)
-                        {
-                            cmbPreviewPage.Items.Add($"Page {i}");
-                        }
-                        cmbPreviewPage.SelectedIndex = Math.Min(selectedIndex, totalPages - 1);
-                    }
-
-                    // Ensure page number is valid
-                    if (pageNumber > totalPages)
-                    {
-                        pageNumber = totalPages;
-                    }
-
-                    // Get page size
-                    SizeF pdfPageSize = Conversion.GetPageSize(pdfBytes, pageNumber - 1);
-                    float pdfWidth = pdfPageSize.Width;
-                    float pdfHeight = pdfPageSize.Height;
-
-                    // Store actual PDF dimensions for resize handle positioning
-                    currentPdfWidth = pdfWidth;
-                    currentPdfHeight = pdfHeight;
-
                     // Render the PDF page to an image using PDFtoImage
-                    var renderOptions = new RenderOptions(Width: width, Height: height, WithAnnotations: true, WithFormFill: true);
+                    var renderOptions = new RenderOptions(Width: width, Height: height, WithAnnotations: true, WithFormFill: true, WithAspectRatio: true);
                     using (SKBitmap pageBitmap = Conversion.ToImage(pdfBytes, pageNumber - 1, password: null, options: renderOptions))
                     using (var pngStream = new MemoryStream())
                     {
@@ -2395,105 +2536,69 @@ namespace DigiSign
                         // Semi-transparent background for text (smaller now)
                         float bannerHeight = 50 * zoomLevel;
                         g.FillRectangle(semitransparentBrush, 0, 0, width, bannerHeight);
-                        
-                        g.DrawString($"?? {Path.GetFileName(pdfPath)}", 
-                            titleFont, textBrush, 
+
+                        g.DrawString($"?? {Path.GetFileName(pdfPath)}",
+                            titleFont, textBrush,
                             new PointF(8 * zoomLevel, 6 * zoomLevel));
-                        
-                        g.DrawString($"Page {pageNumber} of {totalPages} � {pdfWidth:F0} x {pdfHeight:F0} pt", 
-                            infoFont, textBrush, 
+
+                        g.DrawString($"Page {pageNumber} of {totalPages} � {pdfWidth:F0} x {pdfHeight:F0} pt",
+                            infoFont, textBrush,
                             new PointF(8 * zoomLevel, 25 * zoomLevel));
                     }
-                    
+
                     // Draw grid for reference (subtle)
                     DrawGrid(g, width, height);
-                    
-                    // Calculate scale factor
-                    float scale = zoomLevel;
-                    
-                    // Draw signature rectangle at specified position
-                    DrawSignatureRectangle(g, scale, pdfWidth, pdfHeight);
                 }
                 catch (Exception ex)
                 {
-                    // If PDFtoImage rendering fails, fall back to iTextSharp metadata-only view
+                    // If PDFtoImage rendering fails, fall back to iTextSharp metadata-only view.
+                    // NOTE: the bitmap is already sized from the real pdfWidth/pdfHeight above, so
+                    // this placeholder renders into a correctly-proportioned bitmap (no re-allocation).
                     try
                     {
-                        using (var reader = new iTextSharp.text.pdf.PdfReader(pdfPath))
-                        {
-                            // Update page count
-                            int totalPages = reader.NumberOfPages;
-                            if (cmbPreviewPage.Items.Count != totalPages)
-                            {
-                                int selectedIndex = cmbPreviewPage.SelectedIndex;
-                                cmbPreviewPage.Items.Clear();
-                                for (int i = 1; i <= totalPages; i++)
-                                {
-                                    cmbPreviewPage.Items.Add($"Page {i}");
-                                }
-                                cmbPreviewPage.SelectedIndex = Math.Min(selectedIndex, totalPages - 1);
-                            }
-                            
-                            if (pageNumber > totalPages)
-                            {
-                                pageNumber = totalPages;
-                            }
-                            
-                            var pageSize = reader.GetPageSizeWithRotation(pageNumber);
-                            float pdfWidth = pageSize.Width;
-                            float pdfHeight = pageSize.Height;
+                        g.FillRectangle(Brushes.WhiteSmoke, 0, 0, width, height);
+                        g.DrawRectangle(new Pen(Color.DarkGray, 2), 0, 0, width - 1, height - 1);
 
-                            // Store actual PDF dimensions for resize handle positioning
-                            currentPdfWidth = pdfWidth;
-                            currentPdfHeight = pdfHeight;
-                            
-                            // Draw placeholder representation with error message
-                            g.FillRectangle(Brushes.WhiteSmoke, 0, 0, width, height);
-                            g.DrawRectangle(new Pen(Color.DarkGray, 2), 0, 0, width - 1, height - 1);
-                            
-                            using (Font titleFont = new Font("Segoe UI", 10 * zoomLevel, FontStyle.Bold))
-                            using (Font infoFont = new Font("Segoe UI", 8 * zoomLevel))
-                            using (Font errorFont = new Font("Segoe UI", 8 * zoomLevel, FontStyle.Italic))
-                            {
-                                g.DrawString($"?? {Path.GetFileName(pdfPath)}", 
-                                    titleFont, Brushes.DarkRed, 
-                                    new PointF(10 * zoomLevel, 10 * zoomLevel));
-                                
-                                g.DrawString($"Page {pageNumber} of {totalPages} � Size: {pdfWidth:F0} x {pdfHeight:F0} pt", 
-                                    infoFont, Brushes.Gray, 
-                                    new PointF(10 * zoomLevel, 35 * zoomLevel));
-                                
-                                g.DrawString($"? Cannot render PDF content", 
-                                    errorFont, Brushes.Orange, 
-                                    new PointF(10 * zoomLevel, 60 * zoomLevel));
-                                
-                                g.DrawString($"Error: {ex.Message}", 
-                                    errorFont, Brushes.Red, 
-                                    new PointF(10 * zoomLevel, 80 * zoomLevel));
-                                
-                                g.DrawString($"Layout preview mode - signature placement shown below", 
-                                    errorFont, Brushes.Gray, 
-                                    new PointF(10 * zoomLevel, 100 * zoomLevel));
-                            }
-                            
-                            // Draw simulated content
-                            using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(220, 200, 200, 200)))
-                            {
-                                float lineHeight = 15 * zoomLevel;
-                                float margin = 50 * zoomLevel;
-                                float contentWidth = width - (2 * margin);
-                                
-                                for (float y = margin + 120 * zoomLevel; y < height - margin; y += lineHeight)
-                                {
-                                    float lineWidth = contentWidth * (0.7f + (float)(new Random().NextDouble() * 0.3));
-                                    g.FillRectangle(textBrush, margin, y, lineWidth, 8 * zoomLevel);
-                                }
-                            }
-                            
-                            DrawGrid(g, width, height);
-                            float scale = zoomLevel;
-                            DrawSignatureRectangle(g, scale, pdfWidth, pdfHeight);
+                        using (Font titleFont = new Font("Segoe UI", 10 * zoomLevel, FontStyle.Bold))
+                        using (Font infoFont = new Font("Segoe UI", 8 * zoomLevel))
+                        using (Font errorFont = new Font("Segoe UI", 8 * zoomLevel, FontStyle.Italic))
+                        {
+                            g.DrawString($"?? {Path.GetFileName(pdfPath)}",
+                                titleFont, Brushes.DarkRed,
+                                new PointF(10 * zoomLevel, 10 * zoomLevel));
+
+                            g.DrawString($"Page {pageNumber} of {totalPages} � Size: {pdfWidth:F0} x {pdfHeight:F0} pt",
+                                infoFont, Brushes.Gray,
+                                new PointF(10 * zoomLevel, 35 * zoomLevel));
+
+                            g.DrawString($"? Cannot render PDF content",
+                                errorFont, Brushes.Orange,
+                                new PointF(10 * zoomLevel, 60 * zoomLevel));
+
+                            g.DrawString($"Error: {ex.Message}",
+                                errorFont, Brushes.Red,
+                                new PointF(10 * zoomLevel, 80 * zoomLevel));
+
+                            g.DrawString($"Layout preview mode - box placement shown below",
+                                errorFont, Brushes.Gray,
+                                new PointF(10 * zoomLevel, 100 * zoomLevel));
                         }
+
+                        // Draw simulated content
+                        using (SolidBrush simTextBrush = new SolidBrush(Color.FromArgb(220, 200, 200, 200)))
+                        {
+                            float lineHeight = 15 * zoomLevel;
+                            float margin = 50 * zoomLevel;
+                            float contentWidth = width - (2 * margin);
+
+                            for (float lineY = margin + 120 * zoomLevel; lineY < height - margin; lineY += lineHeight)
+                            {
+                                float lineWidth = contentWidth * (0.7f + (float)(new Random().NextDouble() * 0.3));
+                                g.FillRectangle(simTextBrush, margin, lineY, lineWidth, 8 * zoomLevel);
+                            }
+                        }
+
+                        DrawGrid(g, width, height);
                     }
                     catch
                     {
@@ -2502,10 +2607,10 @@ namespace DigiSign
                     }
                 }
             }
-            
+
             return bitmap;
         }
-        
+
         private Bitmap CreateMockPdfPreview()
         {
             // Base size for A4 at 72 DPI
@@ -2519,69 +2624,66 @@ namespace DigiSign
             // Apply zoom
             int width = (int)(baseWidth * zoomLevel);
             int height = (int)(baseHeight * zoomLevel);
-            
+
             // Create a mock A4 page
             Bitmap bitmap = new Bitmap(width, height);
-            
+            bitmap.SetResolution(72f, 72f); // keep GDI+ font/point math consistent with the real-PDF path
+
             using (Graphics g = Graphics.FromImage(bitmap))
             {
                 g.Clear(Color.White);
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                
+
                 // Draw page border
                 g.DrawRectangle(Pens.DarkGray, 0, 0, width - 1, height - 1);
-                
+
                 // Draw mock content
                 using (Font titleFont = new Font("Segoe UI", 16 * zoomLevel, FontStyle.Bold))
                 using (Font subtitleFont = new Font("Segoe UI", 10 * zoomLevel))
                 using (Font textFont = new Font("Segoe UI", 9 * zoomLevel))
                 using (Font smallFont = new Font("Segoe UI", 8 * zoomLevel, FontStyle.Italic))
                 {
-                    g.DrawString("Mock PDF Document", 
-                        titleFont, Brushes.Black, 
+                    g.DrawString("Mock PDF Document",
+                        titleFont, Brushes.Black,
                         new PointF(50 * zoomLevel, 50 * zoomLevel));
-                    
-                    g.DrawString("Signature Placement Preview", 
-                        subtitleFont, Brushes.Gray, 
+
+                    g.DrawString("Signature and Copy Label Placement Preview",
+                        subtitleFont, Brushes.Gray,
                         new PointF(50 * zoomLevel, 90 * zoomLevel));
-                    
-                    g.DrawString("Select an input PDF file in the General tab for actual PDF preview", 
-                        smallFont, Brushes.LightGray, 
+
+                    g.DrawString("Select an input PDF file in the General tab for actual PDF preview",
+                        smallFont, Brushes.LightGray,
                         new PointF(50 * zoomLevel, 120 * zoomLevel));
-                    
+
                     // Draw some mock text lines
                     for (int i = 0; i < 20; i++)
                     {
-                        g.DrawString($"Sample text line {i + 1} - Lorem ipsum dolor sit amet", 
-                            textFont, Brushes.LightGray, 
+                        g.DrawString($"Sample text line {i + 1} - Lorem ipsum dolor sit amet",
+                            textFont, Brushes.LightGray,
                             new PointF(50 * zoomLevel, (160 + i * 20) * zoomLevel));
                     }
                 }
-                
+
                 // Draw grid for reference
                 DrawGrid(g, width, height);
-                
-                // Draw signature rectangle
-                float scale = zoomLevel;
-                DrawSignatureRectangle(g, scale, baseWidth, baseHeight);
             }
-            
+
             return bitmap;
         }
-        
+
         private void DrawGrid(Graphics g, int width, int height)
         {
             // Draw light grid for reference (every 50 pixels at zoom 1.0)
             using (Pen gridPen = new Pen(Color.FromArgb(30, 200, 200, 200)))
             {
                 int gridSpacing = (int)(50 * zoomLevel);
-                
+
                 // Vertical lines
                 for (int x = 0; x < width; x += gridSpacing)
                 {
                     g.DrawLine(gridPen, x, 0, x, height);
                 }
-                
+
                 // Horizontal lines
                 for (int y = 0; y < height; y += gridSpacing)
                 {
@@ -2589,80 +2691,149 @@ namespace DigiSign
                 }
             }
         }
-        
-        private void DrawSignatureRectangle(Graphics g, float scale, float pdfWidth, float pdfHeight)
+
+        // Mirrors DigitalSignatureService.ValidateAndAdjustCoordinates' exact bounds check, so the
+        // preview can warn about a placement that will otherwise be silently auto-repositioned at sign time.
+        private bool IsBoxOutOfBounds(DraggableBox box)
         {
-            // Get signature settings
-            float x = (float)numXCoord.Value * scale;
-            float y = (float)numYCoord.Value * scale;
-            float width = (float)numWidth.Value * scale;
-            float height = (float)numHeight.Value * scale;
+            float x = (float)box.NumX.Value;
+            float y = (float)box.NumY.Value;
+            float w = (float)box.NumWidth.Value;
+            float h = (float)box.NumHeight.Value;
+            return x < 0 || y < 0 || x + w > currentPdfWidth || y + h > currentPdfHeight;
+        }
+
+        // Overlay fonts are cached and only rebuilt when zoomLevel changes, since DrawBoxOverlay now
+        // runs on every drag tick / numeric-field keystroke (not just at final render).
+        private void EnsureOverlayFonts(float scale)
+        {
+            if (_overlayFontCN != null && Math.Abs(_overlayFontsScale - scale) < 0.0001f)
+                return;
+
+            if (_overlayFontCN != null) _overlayFontCN.Dispose();
+            if (_overlayFontText != null) _overlayFontText.Dispose();
+            if (_overlayFontLabel != null) _overlayFontLabel.Dispose();
+
+            // "Times New Roman" Bold and "Arial" are the closest installed GDI+ analogs to iTextSharp's
+            // BaseFont.TIMES_BOLD / BaseFont.HELVETICA used by the real signer. The previous "Helvetica"
+            // family name doesn't exist on Windows and GDI+ silently substituted Microsoft Sans Serif.
+            _overlayFontCN = new Font("Times New Roman", 10 * scale, FontStyle.Bold);
+            _overlayFontText = new Font("Arial", 9 * scale, FontStyle.Regular);
+            _overlayFontLabel = new Font("Segoe UI", 7 * scale);
+            _overlayFontsScale = scale;
+        }
+
+        private BaseFont GetPreviewBaseFontCN()
+        {
+            if (_previewBaseFontCN == null)
+                _previewBaseFontCN = BaseFont.CreateFont(BaseFont.TIMES_BOLD, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            return _previewBaseFontCN;
+        }
+
+        // Draws one box's fill/border/text/caption. Used for both the signature box and the copy-label
+        // box - replaces the old signature-only DrawSignatureRectangle. Called from PicPreview_Paint on
+        // every repaint (drag, numeric-field edits, hover), never from the PDF-rendering methods above,
+        // so overlay state always reflects the live NumericUpDown/text values with no PDF re-decode.
+        private void DrawBoxOverlay(Graphics g, DraggableBox box, float scale, float pdfWidth, float pdfHeight)
+        {
+            float x = (float)box.NumX.Value * scale;
+            float y = (float)box.NumY.Value * scale;
+            float width = (float)box.NumWidth.Value * scale;
+            float height = (float)box.NumHeight.Value * scale;
 
             // Adjust Y coordinate (PDF coordinates start from bottom-left, screen from top-left)
             float scaledPdfHeight = pdfHeight * scale;
             float adjustedY = scaledPdfHeight - y - height;
 
-            // Draw signature rectangle with white/light background (matching actual PDF)
+            bool outOfBounds = IsBoxOutOfBounds(box);
+            Color color = outOfBounds ? Color.Red : box.BorderColor;
+
+            // Draw box fill (matching actual PDF)
             using (Brush fillBrush = new SolidBrush(Color.FromArgb(250, 250, 250, 250)))
             {
                 g.FillRectangle(fillBrush, x, adjustedY, width, height);
             }
 
-            // Draw solid border (matching actual PDF)
-            using (Pen borderPen = new Pen(Color.Black, 1 * scale))
+            // Draw border - red/dashed when the box falls outside the page bounds (see IsBoxOutOfBounds)
+            using (Pen borderPen = new Pen(color, (outOfBounds ? 2f : 1f) * scale))
             {
+                if (outOfBounds)
+                    borderPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawRectangle(borderPen, x, adjustedY, width, height);
             }
 
-            // Draw signature text preview - matching actual PDF text rendering
-            // Actual PDF draws from top-left with padding, not centered
-            float padding = 3 * scale;
-            float fontSizeCN = 10 * scale;
-            float fontSizeText = 9 * scale;
-            float lineHeight = fontSizeCN + 3 * scale;
-            float currentY = adjustedY + padding;
-
+            EnsureOverlayFonts(scale);
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
 
-            // Draw Common Name (bold, larger font)
-            if (!string.IsNullOrWhiteSpace(txtCommonName.Text))
+            // Text layout mirrors DigitalSignatureService.DrawSignatureAppearance/DrawCopyLabel's
+            // constants (padding=3, fontSize=10/9, leading=fontSize+3/+1) and wraps using the exact
+            // same font-metric logic (DigitalSignatureService.WrapText) so the preview's line breaks
+            // match what actually gets stamped into the signed PDF.
+            float padding = 3 * scale;
+            float maxTextWidthPt = Math.Max(1f, (float)box.NumWidth.Value - 6f);
+            float leadingCNPt = 10f + 3f;
+            float maxYScreen = adjustedY + height - padding;
+            float currentY = adjustedY + padding;
+
+            if (box.Id == "signature")
             {
-                using (Font cnFont = new Font("Times New Roman", fontSizeCN, FontStyle.Bold))
+                string cn = txtCommonName.Text != null ? txtCommonName.Text.Trim() : null;
+                if (!string.IsNullOrEmpty(cn))
                 {
-                    g.DrawString(txtCommonName.Text, 
-                        cnFont, 
-                        Brushes.Black, 
-                        new PointF(x + padding, currentY));
-                    currentY += lineHeight;
+                    foreach (string line in DigitalSignatureService.WrapText(cn, GetPreviewBaseFontCN(), 10f, maxTextWidthPt))
+                    {
+                        if (currentY > maxYScreen) break;
+                        g.DrawString(line, _overlayFontCN, Brushes.Black, new PointF(x + padding, currentY));
+                        currentY += leadingCNPt * scale;
+                    }
+                }
+
+                // Blank line (matching actual PDF spacing before the date line)
+                currentY += 9f * scale;
+
+                if (currentY <= maxYScreen)
+                {
+                    string dateText = $"Date: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+                    g.DrawString(dateText, _overlayFontText, Brushes.Black, new PointF(x + padding, currentY));
+                }
+            }
+            else
+            {
+                string labelText = box.PreviewText != null ? box.PreviewText() : null;
+                labelText = labelText != null ? labelText.Trim() : null;
+                if (!string.IsNullOrEmpty(labelText))
+                {
+                    // Right-aligned to match DigitalSignatureService.DrawCopyLabel's Element.ALIGN_RIGHT
+                    foreach (string line in DigitalSignatureService.WrapText(labelText, GetPreviewBaseFontCN(), 10f, maxTextWidthPt))
+                    {
+                        if (currentY > maxYScreen) break;
+                        float lineWidth = g.MeasureString(line, _overlayFontCN).Width;
+                        g.DrawString(line, _overlayFontCN, Brushes.Black, new PointF(x + width - padding - lineWidth, currentY));
+                        currentY += leadingCNPt * scale;
+                    }
                 }
             }
 
-            // Draw empty line (matching actual PDF)
-            currentY += fontSizeText;
+            // Caption pill identifying which box this is (and flagging out-of-bounds placement)
+            string caption = box.Caption != null ? box.Caption() : box.Id;
+            if (outOfBounds)
+                caption += "  (outside page bounds - auto-repositioned at sign time)";
 
-            // Draw Date
-            using (Font textFont = new Font("Helvetica", fontSizeText, FontStyle.Regular))
+            SizeF captionSize = g.MeasureString(caption, _overlayFontLabel);
+            using (SolidBrush captionBg = new SolidBrush(Color.FromArgb(220, 255, 255, 255)))
             {
-                string dateText = $"Date: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-                g.DrawString(dateText, 
-                    textFont, 
-                    Brushes.Black, 
-                    new PointF(x + padding, currentY));
+                g.FillRectangle(captionBg, x, adjustedY - captionSize.Height - 2 * scale, captionSize.Width + 4 * scale, captionSize.Height);
+            }
+            using (SolidBrush captionTextBrush = new SolidBrush(color))
+            {
+                g.DrawString(caption, _overlayFontLabel, captionTextBrush, new PointF(x + 2 * scale, adjustedY - captionSize.Height - 2 * scale));
             }
 
-            // Draw dimension labels (for debugging/preview)
-            using (Font labelFont = new Font("Segoe UI", 7 * scale))
+            using (SolidBrush dimBrush = new SolidBrush(color))
             {
-                g.DrawString($"X: {numXCoord.Value}, Y: {numYCoord.Value}", 
-                    labelFont, 
-                    Brushes.Blue, 
-                    new PointF(x, adjustedY - 15 * scale));
-
-                g.DrawString($"{numWidth.Value} x {numHeight.Value} px", 
-                    labelFont, 
-                    Brushes.Blue, 
-                    new PointF(x, adjustedY + height + 5 * scale));
+                g.DrawString($"{box.NumWidth.Value} x {box.NumHeight.Value} pt",
+                    _overlayFontLabel, dimBrush, new PointF(x, adjustedY + height + 2 * scale));
             }
         }
 

@@ -421,7 +421,7 @@ namespace DigiSign
             foreach (string wrappedLine in wrappedLines)
             {
                 if (currentY - leading < minY) break;
-                over.ShowTextAligned(Element.ALIGN_LEFT, wrappedLine, coords.X + padding, currentY, 0);
+                over.ShowTextAligned(Element.ALIGN_RIGHT, wrappedLine, coords.X + coords.Width - padding, currentY, 0);
                 currentY -= leading;
             }
 
@@ -429,7 +429,7 @@ namespace DigiSign
             over.RestoreState();
         }
 
-        private List<string> WrapText(string text, BaseFont font, float fontSize, float maxWidth)
+        internal static List<string> WrapText(string text, BaseFont font, float fontSize, float maxWidth)
         {
             List<string> wrappedLines = new List<string>();
             string[] words = text.Split(' ');

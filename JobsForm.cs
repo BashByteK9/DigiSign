@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
@@ -32,8 +33,11 @@ namespace DigiSign
         private void InitializeComponents()
         {
             this.Text = $"{VersionInfo.TitleWithVersion} - Jobs";
-            this.ClientSize = new Size(1080, 500);
-            this.MinimumSize = new Size(820, 300);
+            // Wide/tall enough (and MinimumSize floored the same) that all columns - including the
+            // rightmost Resume/Cancel buttons - are visible without horizontal scrolling, and the
+            // window can't be shrunk back down into needing it either.
+            this.ClientSize = new Size(1220, 500);
+            this.MinimumSize = new Size(1220, 300);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.Icon = TrayIconLoader.LoadFromEmbeddedPng("DigiSign.singer_icon.png");
             this.FormClosing += JobsForm_FormClosing;
@@ -56,14 +60,14 @@ namespace DigiSign
 
             AddTextColumn("Time", 100);
             AddTextColumn("Source", 65);
-            AddTextColumn("RouteOrFile", 130, "Route / File");
-            AddTextColumn("TokenOrFile", 110, "Token / File");
+            AddTextColumn("RouteOrFile", 110, "Route / File");
+            AddTextColumn("TokenOrFile", 100, "Token / File");
             AddTextColumn("DocType", 65, "Doc Type");
             AddTextColumn("Stage", 90);
-            AddTextColumn("Progress", 190);
-            AddTextColumn("Result", 90);
-            AddTextColumn("Callback", 100);
-            AddTextColumn("OutputOrError", 200, "Output / Error");
+            AddTextColumn("Progress", 150);
+            AddTextColumn("Result", 85);
+            AddTextColumn("Callback", 90);
+            AddTextColumn("OutputOrError", 170, "Output / Error");
 
             grid.Columns.Add(new DataGridViewButtonColumn
             {
@@ -83,6 +87,9 @@ namespace DigiSign
             });
 
             grid.CellContentClick += Grid_CellContentClick;
+            grid.CellClick += Grid_CellClick;
+            grid.CellMouseEnter += Grid_CellMouseEnter;
+            grid.CellMouseLeave += Grid_CellMouseLeave;
             this.Controls.Add(grid);
 
             refreshTimer = new Timer { Interval = 1000 };
@@ -147,10 +154,65 @@ namespace DigiSign
                 if (job == null || !job.IsResumable)
                     return;
 
-                JobTracker.ResumeJob(jobId);
-                optimisticallyDisabledResume.Add(jobId);
+                // Only mask the button optimistically when the resume actually started - on
+                // NotResumable/AlreadyRunning/NotFound nothing changed, and adding it to the set
+                // anyway would leave the button stuck disabled forever (it only clears once
+                // !job.IsResumable, which a no-op resume never causes).
+                var outcome = JobTracker.ResumeJob(jobId);
+                if (outcome == ResumeOutcome.Started)
+                    optimisticallyDisabledResume.Add(jobId);
                 RefreshJobs();
             }
+        }
+
+        private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            if (grid.Columns[e.ColumnIndex].Name != "OutputOrError")
+                return;
+
+            string path = grid.Rows[e.RowIndex].Cells["OutputOrError"].Tag as string;
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            if (!File.Exists(path))
+            {
+                MessageBox.Show($"Output file no longer exists:\n{path}", "File Not Found",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                Process.Start("explorer.exe", $"/select,\"{path}\"");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Could not open output folder for '{path}': {ex.Message}");
+                MessageBox.Show($"Could not open the output folder:\n{ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            string path = grid.Columns[e.ColumnIndex].Name == "OutputOrError"
+                ? grid.Rows[e.RowIndex].Cells["OutputOrError"].Tag as string
+                : null;
+            if (!string.IsNullOrEmpty(path))
+            {
+                grid.Cursor = Cursors.Hand;
+            }
+        }
+
+        private void Grid_CellMouseLeave(object sender, DataGridViewCellEventArgs e)
+        {
+            grid.Cursor = Cursors.Default;
         }
 
         private void RefreshJobs()
@@ -161,6 +223,11 @@ namespace DigiSign
             string topVisibleJobId = grid.Rows.Count > 0 && grid.FirstDisplayedScrollingRowIndex >= 0
                 ? grid.Rows[grid.FirstDisplayedScrollingRowIndex].Tag as string
                 : null;
+            // Horizontal scroll/focus previously weren't captured here at all, so restoring the
+            // selected row's CurrentCell below (always column 0) forced the grid back to the leftmost
+            // column on every 1s refresh - this preserves both instead.
+            int focusedColumnIndex = grid.CurrentCell != null ? grid.CurrentCell.ColumnIndex : 0;
+            int firstDisplayedColumnIndex = grid.Rows.Count > 0 ? grid.FirstDisplayedScrollingColumnIndex : -1;
 
             grid.SuspendLayout();
             grid.Rows.Clear();
@@ -181,6 +248,7 @@ namespace DigiSign
                 string resultText = ResultText(job);
                 string outputOrError = job.Success == false ? job.ErrorMessage : job.OutputPath;
                 string callbackText = job.CallbackSuccess == null ? "-" : (job.CallbackSuccess.Value ? "OK" : $"FAILED: {job.CallbackMessage}");
+                string progressText = job.ProgressDetail ?? "";
 
                 int rowIndex = grid.Rows.Add(
                     job.StartedAtUtc.ToLocalTime().ToString("HH:mm:ss"),
@@ -189,7 +257,7 @@ namespace DigiSign
                     tokenOrFile ?? "",
                     job.DocumentType ?? "",
                     job.Stage.ToString(),
-                    job.ProgressDetail ?? "",
+                    progressText,
                     resultText,
                     callbackText,
                     outputOrError ?? "",
@@ -199,6 +267,23 @@ namespace DigiSign
                 var row = grid.Rows[rowIndex];
                 row.Tag = job.JobId;
 
+                // Columns narrowed in this pass (Progress/Result/Callback/Output-Error) can truncate -
+                // a tooltip keeps the full text reachable via hover instead of losing it outright.
+                row.Cells["Progress"].ToolTipText = progressText;
+                row.Cells["Result"].ToolTipText = resultText;
+                row.Cells["Callback"].ToolTipText = callbackText;
+                row.Cells["OutputOrError"].ToolTipText = outputOrError ?? "";
+
+                // Only a successful job's OutputOrError cell holds an openable file path - style it
+                // like a link and stash the path for Grid_CellClick/Grid_CellMouseEnter to use.
+                bool hasOutputPath = job.Success == true && !string.IsNullOrEmpty(job.OutputPath);
+                row.Cells["OutputOrError"].Tag = hasOutputPath ? job.OutputPath : null;
+                if (hasOutputPath)
+                {
+                    row.Cells["OutputOrError"].Style.ForeColor = Color.Blue;
+                    row.Cells["OutputOrError"].Style.Font = new Font(grid.Font, FontStyle.Underline);
+                }
+
                 ApplyRowColor(row, job);
 
                 bool resumeEnabled = job.IsResumable && !optimisticallyDisabledResume.Contains(job.JobId);
@@ -207,12 +292,12 @@ namespace DigiSign
                 StyleButtonCell(row.Cells["Cancel"], cancelEnabled);
             }
 
-            RestoreSelectionAndScroll(selectedJobId, topVisibleJobId);
+            RestoreSelectionAndScroll(selectedJobId, topVisibleJobId, focusedColumnIndex, firstDisplayedColumnIndex);
 
             grid.ResumeLayout();
         }
 
-        private void RestoreSelectionAndScroll(string selectedJobId, string topVisibleJobId)
+        private void RestoreSelectionAndScroll(string selectedJobId, string topVisibleJobId, int focusedColumnIndex, int firstDisplayedColumnIndex)
         {
             if (selectedJobId != null)
             {
@@ -220,7 +305,8 @@ namespace DigiSign
                 {
                     if ((string)row.Tag == selectedJobId)
                     {
-                        grid.CurrentCell = row.Cells[0];
+                        int columnIndex = Math.Min(Math.Max(focusedColumnIndex, 0), row.Cells.Count - 1);
+                        grid.CurrentCell = row.Cells[columnIndex];
                         break;
                     }
                 }
@@ -237,10 +323,23 @@ namespace DigiSign
                     }
                 }
             }
+
+            // Setting CurrentCell above can itself auto-scroll the grid to bring that cell into view,
+            // which would undo horizontal position restoration if it ran first - so this runs last to
+            // have the final say on horizontal scroll position.
+            if (firstDisplayedColumnIndex >= 0 && firstDisplayedColumnIndex < grid.Columns.Count && grid.Rows.Count > 0)
+            {
+                grid.FirstDisplayedScrollingColumnIndex = firstDisplayedColumnIndex;
+            }
         }
 
         private static string ResultText(JobRecord job)
         {
+            // Checked first: Stage/Success reflect the last terminal outcome and don't move until the
+            // background resume actually reaches a checkpoint, so without this a resuming job kept
+            // showing its old "CANCELLED"/"FAILED" result throughout the resume.
+            if (job.IsActive) return "RESUMING...";
+            if (job.CancellationRequested && job.Stage != JobStage.Cancelled) return "CANCELLING...";
             if (job.Stage == JobStage.Interrupted) return "INTERRUPTED";
             if (job.Stage == JobStage.Cancelled) return "CANCELLED";
             if (job.Success == null) return "...";
@@ -249,9 +348,13 @@ namespace DigiSign
 
         private static void ApplyRowColor(DataGridViewRow row, JobRecord job)
         {
-            // Stage-based checks take priority over the Success-based fallback, since an Interrupted
-            // or Cancelled job may still have Success == null (it never got the chance to complete).
-            if (job.Stage == JobStage.Interrupted)
+            // Same priority as ResultText above - an in-flight resume/cancel takes precedence over
+            // whatever stale terminal Stage/Success the record still shows.
+            if (job.IsActive)
+                row.DefaultCellStyle.ForeColor = Color.DodgerBlue;
+            else if (job.CancellationRequested && job.Stage != JobStage.Cancelled)
+                row.DefaultCellStyle.ForeColor = Color.DarkGoldenrod;
+            else if (job.Stage == JobStage.Interrupted)
                 row.DefaultCellStyle.ForeColor = Color.DarkOrange;
             else if (job.Stage == JobStage.Cancelled)
                 row.DefaultCellStyle.ForeColor = Color.Gray;

@@ -86,6 +86,12 @@ namespace DigiSign
         /// <summary>True if this job is still actively progressing and a cooperative cancel could still take effect before its next step.</summary>
         [JsonIgnore]
         public bool IsCancelable => !CancellationRequested && !TerminalStages.Contains(Stage);
+
+        /// <summary>True if a resume for this job is currently running on a ThreadPool thread right now.
+        /// Not persisted - computed at snapshot time from JobTracker's activeJobIds set. Lets the UI show
+        /// the job is in flight even while Stage/Success still reflect its previous terminal outcome.</summary>
+        [JsonIgnore]
+        public bool IsActive { get; set; }
     }
 
     public static class JobTracker
@@ -387,7 +393,8 @@ namespace DigiSign
                     OwnerProcessId = source.OwnerProcessId,
                     OwnerProcessStartTimeUtc = source.OwnerProcessStartTimeUtc,
                     ResumeCount = source.ResumeCount,
-                    Sequence = source.Sequence
+                    Sequence = source.Sequence,
+                    IsActive = activeJobIds.ContainsKey(source.JobId)
                 };
             }
         }
