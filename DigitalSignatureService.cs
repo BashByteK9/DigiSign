@@ -193,6 +193,42 @@ namespace DigiSign
         }
 
         /// <summary>
+        /// Builds the certificate chain (signing cert + issuer, when resolvable) iTextSharp needs to
+        /// actually attempt an OCSP check - it only does so when the chain has 2+ certificates. Falls
+        /// back to a single-certificate chain (today's known-safe behavior, which simply skips OCSP) on
+        /// any lookup trouble, so a chain-resolution problem can never introduce a new signing failure.
+        /// </summary>
+        private Org.BouncyCastle.X509.X509Certificate[] BuildOcspCertificateChain(X509Certificate2 cert, int timeoutSeconds)
+        {
+            try
+            {
+                using (var chain = new X509Chain())
+                {
+                    chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck; // we do our own resilient OCSP, not .NET's
+                    chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+                    chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(Math.Max(1, Math.Min(timeoutSeconds, 10)));
+                    chain.Build(cert); // return value ignored - ChainElements is populated regardless
+
+                    if (chain.ChainElements.Count >= 2)
+                    {
+                        var bcCerts = new Org.BouncyCastle.X509.X509Certificate[chain.ChainElements.Count];
+                        for (int i = 0; i < chain.ChainElements.Count; i++)
+                            bcCerts[i] = DotNetUtilities.FromX509Certificate(chain.ChainElements[i].Certificate);
+                        return bcCerts;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Could not resolve certificate chain for OCSP - signing without OCSP data: {ex.Message}");
+            }
+
+            // Today's known-safe fallback (also what a self-signed cert naturally resolves to, since
+            // it's its own issuer) - a single-cert chain, which iTextSharp simply skips OCSP for.
+            return new[] { DotNetUtilities.FromX509Certificate(cert) };
+        }
+
+        /// <summary>
         /// Signs a PDF document with the provided certificate
         /// </summary>
         public void SignPdf(string inputPath, string outputPath, X509Certificate2 cert,
@@ -200,93 +236,125 @@ namespace DigiSign
         {
             try
             {
-                // Extract CN from the certificate subject
-                string cn = cert.Subject
-                    .Split(',')
-                    .Select(p => p.Trim())
-                    .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
-                    ?.Substring(3) ?? "Unknown";
-
-                string signatureText =
-                    $"{cn}\n \nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-
-                // Setup PDF reader
-                PdfReader reader = new PdfReader(inputPath);
-                const int page = 1; // Invoices are always single-page documents
-
-                using (FileStream os = new FileStream(outputPath, FileMode.Create))
+                try
                 {
-                    PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
-                    PdfSignatureAppearance appearance = stamper.SignatureAppearance;
-                    appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
-                    //appearance.Reason = "Digitally signed";
-                    appearance.Acro6Layers = false;
-
-                    iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
-                    float pageWidth = pageSize.Width;
-                    float pageHeight = pageSize.Height;
-
-                    // Validate and adjust coordinates
-                    var adjustedCoords = ValidateAndAdjustCoordinates(
-                        config.XCoordinate, config.YCoordinate,
-                        config.Width, config.Height,
-                        pageWidth, pageHeight, page);
-
-                    // Define visible signature area
-                    appearance.SetVisibleSignature(
-                        new iTextSharp.text.Rectangle(
-                            adjustedCoords.X,
-                            adjustedCoords.Y,
-                            adjustedCoords.X + adjustedCoords.Width,
-                            adjustedCoords.Y + adjustedCoords.Height),
-                        page,
-                        $"sig_{page}");
-
-                    // Disable default Layer2 text to avoid double rendering
-                    appearance.Layer2Text = string.Empty;
-
-                    // Draw signature appearance
-                    DrawSignatureAppearance(stamper, page, adjustedCoords, cn, signatureText);
-
-                    // Draw the copy label (e.g. "Original for Buyer") before signing, so it's
-                    // part of the certified content rather than a post-certification alteration.
-                    if (!string.IsNullOrWhiteSpace(copyLabelText))
-                    {
-                        var labelCoords = ValidateAndAdjustCoordinates(
-                            config.CopyLabelX, config.CopyLabelY,
-                            config.CopyLabelWidth, config.CopyLabelHeight,
-                            pageWidth, pageHeight, page);
-
-                        DrawCopyLabel(stamper, page, labelCoords, copyLabelText);
-                    }
-
-                    // Create signature with resilient TSA client
-                    IExternalSignature externalSignature = new SignatureHelper.SafeCertificateSignature(cert, "SHA-256");
-                    Org.BouncyCastle.X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
-                    IOcspClient ocspClient = new SignatureHelper.ResilientOcspClient(config.EnableOcspCheck, config.OcspTimeoutSeconds);
-
-                    // Use resilient TSA client that handles fallback internally
-                    ITSAClient tsaClient = new SignatureHelper.ResilientTSAClient();
-
-                    MakeSignature.SignDetached(
-                        appearance,
-                        externalSignature,
-                        new[] { bcCert },
-                        null,
-                        ocspClient,
-                        tsaClient,
-                        0,
-                        CryptoStandard.CMS
-                    );
-
-                    Logger.Info($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}");
+                    SignPdfCore(inputPath, outputPath, cert, config, copyLabelText, useOcsp: config.EnableOcspCheck);
                 }
+                catch (Exception ex) when (config.EnableOcspCheck)
+                {
+                    // Guarantees an OCSP-side problem can never block signing: ResilientOcspClient
+                    // already fails open internally (returns null, never throws) - this is a second,
+                    // outer layer of the same guarantee for anything else that could go wrong once
+                    // OCSP data (or the expanded certificate chain it requires) is actually involved.
+                    Logger.Warning($"Signing with OCSP verification failed ({ex.Message}) - retrying without OCSP so '{Path.GetFileName(inputPath)}' still gets signed");
+                    SignPdfCore(inputPath, outputPath, cert, config, copyLabelText, useOcsp: false);
+                }
+
+                Logger.Info($"File(s) Signed Successfully - {Path.GetFileName(outputPath)}");
             }
             catch (Exception ex)
             {
+                // Reached only if OCSP was off to begin with, or the retry above also failed (a real,
+                // non-OCSP problem).
                 Logger.Error($"ERROR | [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] | Failed to sign '{inputPath}'. Exception: {ex.Message}");
                 LogToFile($"Error;Failed to sign PDF: {ex.Message}", outputFolderPath);
                 throw; // Re-throw so Program.cs can handle it properly
+            }
+        }
+
+        /// <summary>
+        /// Does the actual signing. No try/catch here on purpose - SignPdf above decides whether a
+        /// failure here should be retried with OCSP disabled or logged/rethrown as final, and logging
+        /// (including the single-line plf.txt status file the invoking ERP reads) must only happen once,
+        /// for the final outcome - not on a first attempt that the retry then successfully recovers from.
+        /// </summary>
+        private void SignPdfCore(string inputPath, string outputPath, X509Certificate2 cert,
+            SignatureConfiguration config, string copyLabelText, bool useOcsp)
+        {
+            // Extract CN from the certificate subject
+            string cn = cert.Subject
+                .Split(',')
+                .Select(p => p.Trim())
+                .FirstOrDefault(p => p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+                ?.Substring(3) ?? "Unknown";
+
+            string signatureText =
+                $"{cn}\n \nDate: {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
+
+            // Setup PDF reader
+            PdfReader reader = new PdfReader(inputPath);
+            const int page = 1; // Invoices are always single-page documents
+
+            using (FileStream os = new FileStream(outputPath, FileMode.Create))
+            {
+                PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0');
+                PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+                appearance.CertificationLevel = PdfSignatureAppearance.CERTIFIED_NO_CHANGES_ALLOWED;
+                //appearance.Reason = "Digitally signed";
+                appearance.Acro6Layers = false;
+
+                iTextSharp.text.Rectangle pageSize = reader.GetPageSize(page);
+                float pageWidth = pageSize.Width;
+                float pageHeight = pageSize.Height;
+
+                // Validate and adjust coordinates
+                var adjustedCoords = ValidateAndAdjustCoordinates(
+                    config.XCoordinate, config.YCoordinate,
+                    config.Width, config.Height,
+                    pageWidth, pageHeight, page);
+
+                // Define visible signature area
+                appearance.SetVisibleSignature(
+                    new iTextSharp.text.Rectangle(
+                        adjustedCoords.X,
+                        adjustedCoords.Y,
+                        adjustedCoords.X + adjustedCoords.Width,
+                        adjustedCoords.Y + adjustedCoords.Height),
+                    page,
+                    $"sig_{page}");
+
+                // Disable default Layer2 text to avoid double rendering
+                appearance.Layer2Text = string.Empty;
+
+                // Draw signature appearance
+                DrawSignatureAppearance(stamper, page, adjustedCoords, cn, signatureText);
+
+                // Draw the copy label (e.g. "Original for Buyer") before signing, so it's
+                // part of the certified content rather than a post-certification alteration.
+                if (!string.IsNullOrWhiteSpace(copyLabelText))
+                {
+                    var labelCoords = ValidateAndAdjustCoordinates(
+                        config.CopyLabelX, config.CopyLabelY,
+                        config.CopyLabelWidth, config.CopyLabelHeight,
+                        pageWidth, pageHeight, page);
+
+                    DrawCopyLabel(stamper, page, labelCoords, copyLabelText);
+                }
+
+                // Create signature with resilient TSA client
+                IExternalSignature externalSignature = new SignatureHelper.SafeCertificateSignature(cert, "SHA-256");
+
+                // Only build the multi-cert chain (needed for iTextSharp to attempt OCSP at all) when
+                // OCSP is actually in use for this attempt - keeps behavior byte-for-byte identical to
+                // before this feature existed whenever OCSP is off (single-cert chain, no OCSP data).
+                Org.BouncyCastle.X509.X509Certificate[] bcChain = useOcsp
+                    ? BuildOcspCertificateChain(cert, config.OcspTimeoutSeconds)
+                    : new[] { DotNetUtilities.FromX509Certificate(cert) };
+                IOcspClient ocspClient = new SignatureHelper.ResilientOcspClient(useOcsp, config.OcspTimeoutSeconds);
+
+                // Use resilient TSA client that handles fallback internally
+                ITSAClient tsaClient = new SignatureHelper.ResilientTSAClient();
+
+                MakeSignature.SignDetached(
+                    appearance,
+                    externalSignature,
+                    bcChain,
+                    null,
+                    ocspClient,
+                    tsaClient,
+                    0,
+                    CryptoStandard.CMS
+                );
             }
         }
 
