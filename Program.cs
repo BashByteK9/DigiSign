@@ -773,7 +773,7 @@ namespace DigiSign
                     issue => hostForm.BeginInvoke(new Action(() =>
                         MessageBox.Show(issue, "DigiSign Listener", MessageBoxButtons.OK, MessageBoxIcon.Warning))),
                     new PdfiumPrintService(), appSettings.PrinterName,
-                    appSettings.EnableOcspCheck, appSettings.OcspTimeoutSeconds);
+                    appSettings.EnableOcspCheck, appSettings.OcspTimeoutSeconds, new RawZplPrintService());
 
                 JobTracker.RegisterResumeHandler(JobSource.Listener, jobId => listenerService.ProcessResumedJob(jobId));
                 JobTracker.RegisterResumeHandler(JobSource.Batch, ResumeBatchJob);

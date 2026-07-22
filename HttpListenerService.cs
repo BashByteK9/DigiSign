@@ -12,7 +12,7 @@ namespace DigiSign
 {
     public class HttpListenerService : IDisposable
     {
-        private static readonly Regex RoutePattern = new Regex(@"^/(invoice|invoice-print|invoice-sign|invoice-sign-print)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex RoutePattern = new Regex(@"^/(invoice|invoice-print|invoice-sign|invoice-sign-print|label-print)/?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly int port;
         private readonly XmlData xmlData;
@@ -23,13 +23,14 @@ namespace DigiSign
         private readonly string printerName;
         private readonly bool enableOcspCheck;
         private readonly int ocspTimeoutSeconds;
+        private readonly ILabelPrintService labelPrintService;
 
         private HttpListener listener;
         private Thread listenThread;
         private volatile bool stopping;
 
         public HttpListenerService(int port, XmlData xmlData, IDocumentDownloader downloader, string licensePath, Action<string> onLicenseIssue,
-            IPrintService printService, string printerName, bool enableOcspCheck, int ocspTimeoutSeconds)
+            IPrintService printService, string printerName, bool enableOcspCheck, int ocspTimeoutSeconds, ILabelPrintService labelPrintService)
         {
             this.port = port;
             this.xmlData = xmlData;
@@ -40,6 +41,7 @@ namespace DigiSign
             this.printerName = printerName;
             this.enableOcspCheck = enableOcspCheck;
             this.ocspTimeoutSeconds = ocspTimeoutSeconds;
+            this.labelPrintService = labelPrintService;
         }
 
         public void Start()
@@ -148,6 +150,34 @@ namespace DigiSign
                 return;
             }
 
+            if (string.Equals(path, "/label-printers", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "/label-printers/", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Warning($"Rejected non-GET request to {path}");
+                    WriteJson(context, 405, new { success = false, error = "Expected GET." });
+                    return;
+                }
+
+                HandleListPrintersRequest(context);
+                return;
+            }
+
+            if (string.Equals(path, "/heartbeat", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "/heartbeat/", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Warning($"Rejected non-GET request to {path}");
+                    WriteJson(context, 405, new { success = false, error = "Expected GET." });
+                    return;
+                }
+
+                HandleHeartbeatRequest(context);
+                return;
+            }
+
             var match = RoutePattern.Match(path);
             if (!match.Success)
             {
@@ -155,7 +185,7 @@ namespace DigiSign
                 WriteJson(context, 404, new
                 {
                     success = false,
-                    error = "Unknown route. Expected POST /invoice, /invoice-print, /invoice-sign, or /invoice-sign-print."
+                    error = "Unknown route. Expected POST /invoice, /invoice-print, /invoice-sign, /invoice-sign-print, or /label-print."
                 });
                 return;
             }
@@ -168,6 +198,12 @@ namespace DigiSign
             }
 
             string route = match.Groups[1].Value.ToLowerInvariant();
+
+            if (route == "label-print")
+            {
+                HandleLabelPrintRequest(context);
+                return;
+            }
 
             string body;
             using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
@@ -455,11 +491,83 @@ namespace DigiSign
             }
         }
 
+        /// <summary>
+        /// Handles POST /label-print: prints a raw ZPL command string directly to a printer, synchronously.
+        /// Unlike the invoice routes there's no fetch/sign step, so the response reflects the actual
+        /// print outcome instead of a 202-and-poll pattern.
+        /// </summary>
+        private void HandleLabelPrintRequest(HttpListenerContext context)
+        {
+            string body;
+            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+            {
+                body = reader.ReadToEnd();
+            }
+
+            LabelPrintRequest request;
+            try
+            {
+                request = JsonConvert.DeserializeObject<LabelPrintRequest>(body);
+            }
+            catch (JsonException ex)
+            {
+                Logger.Warning($"Rejected label-print request with invalid JSON body: {ex.Message}");
+                WriteJson(context, 400, new { success = false, route = "label-print", error = $"Invalid JSON body: {ex.Message}" });
+                return;
+            }
+
+            string validationError = LabelPrintPipeline.Validate(request);
+            if (validationError != null)
+            {
+                Logger.Warning($"Rejected label-print request: {validationError}");
+                WriteJson(context, 400, new { success = false, route = "label-print", error = validationError });
+                return;
+            }
+
+            string printerLabel = string.IsNullOrWhiteSpace(request.Printer) ? "(default printer)" : request.Printer;
+            string jobId = JobTracker.CreateJob(
+                token: Guid.NewGuid().ToString("N"), route: "label-print", clientId: printerLabel, invoiceNo: null,
+                source: JobSource.LabelPrint, doSign: false, doPrint: true).JobId;
+
+            Logger.Info($"[job={jobId}] Printing label to {printerLabel}");
+            JobTracker.UpdateStage(jobId, JobStage.Printing, $"Printing to {printerLabel}...");
+
+            var result = LabelPrintPipeline.PrintLabel(request, labelPrintService);
+
+            if (result.Success)
+            {
+                JobTracker.SetPrinted(jobId);
+                JobTracker.Complete(jobId, true, null, null);
+                Logger.LogToPlf($"Label print job {jobId}: printed successfully", isError: false);
+                WriteJson(context, 200, new { success = true, jobId });
+            }
+            else
+            {
+                JobTracker.Complete(jobId, false, null, result.Error);
+                Logger.Error($"[job={jobId}] Label print failed: {result.Error}");
+                Logger.LogToPlf($"Label print job {jobId}: failed - {result.Error}", isError: true);
+                WriteJson(context, 500, new { success = false, jobId, error = result.Error });
+            }
+        }
+
+        /// <summary>Handles GET /heartbeat: confirms the listener process itself is alive and responding - deliberately no license/printer/JobTracker checks.</summary>
+        private static void HandleHeartbeatRequest(HttpListenerContext context)
+        {
+            WriteJson(context, 200, new { success = true, status = "ok" });
+        }
+
+        /// <summary>Handles GET /label-printers: lists installed printer names so a caller can discover a valid value for /label-print's Printer field.</summary>
+        private static void HandleListPrintersRequest(HttpListenerContext context)
+        {
+            var printers = System.Drawing.Printing.PrinterSettings.InstalledPrinters.Cast<string>().ToList();
+            WriteJson(context, 200, new { success = true, printers });
+        }
+
         private static void ApplyCorsHeaders(HttpListenerContext context)
         {
             string origin = context.Request.Headers["Origin"];
             context.Response.Headers["Access-Control-Allow-Origin"] = string.IsNullOrEmpty(origin) ? "*" : origin;
-            context.Response.Headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+            context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
             context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
         }
 

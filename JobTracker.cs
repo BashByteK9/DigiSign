@@ -25,7 +25,8 @@ namespace DigiSign
     public enum JobSource
     {
         Listener,
-        Batch
+        Batch,
+        LabelPrint
     }
 
     public enum ResumeOutcome
