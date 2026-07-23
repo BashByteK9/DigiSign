@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 
 namespace DigiSign
@@ -32,8 +33,22 @@ namespace DigiSign
 
             if (!LicenseManager.ValidateLicense(licensePath))
             {
-                licenseIssue = "Valid license required for signing.";
-                return new SignSingleFileResult { Success = false, Error = licenseIssue };
+                // No valid purchased license - fall back to the 30-day evaluation period (if still
+                // active) rather than refusing outright. The trial marker lives alongside license.txt.
+                string trialPath = Path.Combine(
+                    Path.GetDirectoryName(licensePath) ?? System.AppDomain.CurrentDomain.BaseDirectory,
+                    TrialManager.TrialFileName);
+                var trialStatus = TrialManager.GetTrialStatus(trialPath);
+
+                if (trialStatus.IsActive)
+                {
+                    Logger.Info($"No valid purchased license - signing in TRIAL MODE ({trialStatus.DaysRemaining} day(s) remaining)");
+                }
+                else
+                {
+                    licenseIssue = "Valid license required for signing.";
+                    return new SignSingleFileResult { Success = false, Error = licenseIssue };
+                }
             }
 
             var signatureConfig = new SignatureConfiguration(

@@ -363,3 +363,16 @@ MigrationBackup/
 FodyWeavers.xsd
 # NuGet executables
 .nuget/
+
+# DigiSign: machine/customer-specific, generated, or secret-like files - never ship these.
+# Live config still exists locally for dev/testing; only .example templates are tracked.
+/license.txt
+/license.key
+/admin.license
+/plf.txt
+/application_log.txt
+/logs/
+/IP.xml
+/appsettings.json
+!/IP.xml.example
+!/appsettings.json.example

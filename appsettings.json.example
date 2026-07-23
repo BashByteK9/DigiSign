@@ -1,0 +1,14 @@
+{
+  "VerboseMode": false,
+  "Port": 5000,
+  "InvoiceApiBaseUrl": "https://reports.myerpwise.net",
+  "InvoiceApiKey": "REPLACE_WITH_CUSTOMER_API_KEY",
+  "NoAuthApi": false,
+  "IncludeSignedPdfInCallback": true,
+  "InvoiceSignedCallbackUrl": "",
+  "EnableListenerMode": true,
+  "PrinterName": "",
+  "EnableOcspCheck": true,
+  "OcspTimeoutSeconds": 10,
+  "UpdateCheckUrl": ""
+}

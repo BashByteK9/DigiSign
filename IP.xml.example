@@ -1,0 +1,48 @@
+<ENVELOPE>
+	<FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>C:\PATH\TO\INPUT\INVOICE.pdf</FILENAME>
+			<!-- 0: input PDF path(s) to sign -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>C:\PATH\TO\OUTPUT\FOLDER</FILENAME>
+			<!-- 1: output folder for signed PDFs -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>REPLACE_WITH_CERTIFICATE_COMMON_NAME</FILENAME>
+			<!-- 2: certificate CommonName to search for in CurrentUser/LocalMachine "My" stores -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>REPLACE_WITH_PIN</FILENAME>
+			<!-- 3: PIN for the certificate's private key -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>400</FILENAME>
+			<!-- 4: signature X -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>75</FILENAME>
+			<!-- 5: signature Y -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>150</FILENAME>
+			<!-- 6: signature width -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>50</FILENAME>
+			<!-- 7: signature height -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>F</FILENAME>
+			<!-- 8: SignOnPage F=First Page, E=Each Page, L=Last Page, default value=L -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>N</FILENAME>
+			<!-- 9: Open Output folder after signing: Y=open, N=don't open, default value=Y -->
+		</FILENAMELIST>
+		<FILENAMELIST>
+			<FILENAME>N</FILENAME>
+			<!-- 10: USESELFSIGNED - Y=use the self-signed fallback cert, N=require a real cert match -->
+		</FILENAMELIST>
+	</FILENAMELIST>
+</ENVELOPE>

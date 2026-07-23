@@ -34,8 +34,8 @@ Settings (`/settings` mode) has a "Restart App" button that closes the settings 
 ## Two config files — don't confuse them
 
 - **IP.xml** — legacy config, written by an external ERP integration (Tally-style). It's a flat, *positional* list of `<FILENAMELIST><FILENAME>` entries parsed by index in `Program.ReadXmlData` — there are no named keys, so reordering entries breaks everything. Indices 0–10 hold: input file paths, output folder, certificate CommonName, PIN, signature X/Y/width/height, `SignOnPage` (F/E/L), `OpenOutputFolder` (Y/N), and an optional `USESELFSIGNED` flag (index 10).
-- **appsettings.json** — newer JSON config (via `AppSettingsLoader`) for listener-mode-only settings: `VerboseMode`, `Port` (default 8943), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `EnableListenerMode`, `PrinterName`. If this file is missing, `AppSettingsLoader` auto-migrates it once from legacy `IP.xml` indices 11–15 (in that same historical ERP scheme) and writes it out. `EnableListenerMode` replaced the older, inverted `LaunchInBatchMode` flag — `AppSettingsLoader.Load` transparently migrates any on-disk file still using the old key (inverting its value) the first time it's loaded, preserving whatever mode the install was actually running before the upgrade.
-- Both files are edited together through the same `LicenseGenerationForm(settingsOnly: true)` UI (`/settings` mode) — it has separate tabs for the signing/XML fields vs. the listener/API fields.
+- **appsettings.json** — newer JSON config (via `AppSettingsLoader`) for listener-mode-only settings: `VerboseMode`, `Port` (default 5000), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `NoAuthApi`, `IncludeSignedPdfInCallback`, `InvoiceSignedCallbackUrl`, `EnableListenerMode`, `PrinterName`, `EnableOcspCheck` (default `true`), `OcspTimeoutSeconds` (default `10`). If this file is missing, `AppSettingsLoader` auto-migrates it once from legacy `IP.xml` indices 11–15 (in that same historical ERP scheme) and writes it out. `EnableListenerMode` replaced the older, inverted `LaunchInBatchMode` flag — `AppSettingsLoader.Load` transparently migrates any on-disk file still using the old key (inverting its value) the first time it's loaded, preserving whatever mode the install was actually running before the upgrade. Label-printing's own layout fields (copy text, X/Y/width/height, print-all-copies) live in `IP.xml`/`XmlData`, not in `appsettings.json`.
+- Both files are edited together through the same `LicenseGenerationForm(settingsOnly: true)` UI (`/settings` mode) — its top-level `tabControl` has `tabApiSettings` (port, invoice API base URL/key, show-key checkbox, No-Auth, include-signed-pdf, callback URL, listener-mode checkbox) as a sibling of `tabSettings` ("PDF Signing Settings"), which itself nests a second `tabSettingsControl` with `tabGeneral` (input PDF, output folder, cert CN, PIN, verbose mode, printer, OCSP checkbox + timeout), `tabSignature` (signature X/Y/width/height, sign-on-page, open-output-folder, self-signed cert, plus the label-printing copy fields), and `tabPreview` (live drag/resize preview canvas). `tabApiSettings`'s Update Check URL field + "Check for Updates" button are admin-only — created only when `settingsOnlyMode` is `false`, so `/settings` never shows them.
 
 ## Licensing (two independent tiers)
 
@@ -43,9 +43,23 @@ Settings (`/settings` mode) has a "Restart App" button that closes the settings 
 - **Admin license** (`admin.license`) — separate and unrelated to the user license. Gates `/admin` mode, validated by `LicenseManager.ValidateAdminLicense` against a hardcoded secret (`AdminKey = SHA256(AdminID + "|DIGISIGN_ADMIN_SECRET")`). An admin uses this mode to turn a customer's `license.key` into their `license.txt`.
 - Listener mode always starts regardless of user-license validity — licensing is enforced per HTTP request inside `HttpListenerService`, not at startup, so the tray/listener stays up even with an expired/missing license (only signing requests get rejected).
 
+## Trial/evaluation licensing
+
+[TrialManager.cs](TrialManager.cs) grants a 30-day evaluation period so a brand-new install can sign before a purchased license exists, without changing any existing license semantics.
+
+- `TrialManager.EnsureTrialStarted` runs unconditionally at the top of `Program.cs`'s `Main()`, for every mode, on every run — it writes `trial.lic` (same `AppDomain.CurrentDomain.BaseDirectory`-relative convention as everything else) the first time it sees this device's `LicenseManager.GetDeviceId()`, and is a no-op afterward. The clock starts at first-ever run, not at first *signing attempt* — a customer who only runs `/listen` for a week before ever signing still has the same 30-day window.
+- `trial.lic` mirrors `license.txt`'s tamper-resistance pattern: `DeviceID`, `TrialStartUtc`, and `TrialHash = SHA256(DeviceID|TrialStartUtc|"DIGISIGN_TRIAL_SECRET")`. A hash mismatch (e.g. someone hand-edits `TrialStartUtc` to "reset" the trial without knowing the secret) is treated as **expired**, never as "more time" — same class of protection as `license.txt`/`admin.license`, not hardened DRM.
+- The fallback only ever engages where a purchased-license check already exists and already failed: `Program.cs`'s batch-mode startup gate, and `SigningPipeline.SignSingleFile` (shared by the listener's per-token pipeline and batch-mode job resume). Neither `LicenseManager.ValidateLicense` nor `GetLicenseExpiryDays` were touched — this is a fallback layered on top, not a change to license semantics.
+- Remaining days are surfaced in two places: the `/settings` General tab (`GetLicenseStatusText`) and the tray context-menu header line (`GetTraySubtitleSuffix`, e.g. `DigiSign Listener — port 5000 — Trial: 12 day(s) left`) — both go silent (no suffix) once a valid purchased license exists.
+
 ## HTTP listener mode
 
-[HttpListenerService.cs](HttpListenerService.cs) listens on `http://localhost:{port}/` and handles four routes — `POST /invoice`, `/invoice-print`, `/invoice-sign`, `/invoice-sign-print` — matched by regex with no token in the path. The ERP sends a JSON body: `{"ClientId": "...", "Tokens": [{"TokenId": "...", "InvoiceNo": "..."}, ...]}`, i.e. one request can batch multiple invoices for the same client.
+[HttpListenerService.cs](HttpListenerService.cs) listens on `http://localhost:{port}/` and handles a batch-invoice route family plus two standalone utility routes:
+
+- `POST /invoice`, `/invoice-print`, `/invoice-sign`, `/invoice-sign-print`, `/label-print` all match one regex (`^/(invoice|invoice-print|invoice-sign|invoice-sign-print|label-print)/?$`, no token in the path). The four `/invoice*` routes take the batch body below; `/label-print` is unrelated in shape (see the Label printing section) and is handled synchronously, not through the job pipeline described here.
+- `GET /heartbeat` and `GET /label-printers` are matched outside that regex as standalone paths — `/heartbeat` is a liveness check, `/label-printers` lists installed printers (Windows print queue names) so the ERP can populate a printer picker before sending `/label-print` requests.
+
+For the four `/invoice*` routes, the ERP sends a JSON body: `{"ClientId": "...", "Tokens": [{"TokenId": "...", "InvoiceNo": "..."}, ...]}`, i.e. one request can batch multiple invoices for the same client.
 
 1. The request is validated synchronously (`ClientId` present, `Tokens` non-empty, every `TokenId` non-blank) — a bad batch gets an immediate `400` and no jobs are created.
 2. For a valid batch, `JobTracker.CreateJob` registers one job per `TokenId` (persisted to `logs/jobs/*.json`, bounded in-memory ring buffer of the last 200, keyed by GUID) — `JobsForm` reads `JobTracker.Snapshot()` to show recent activity (both listener and batch-signing jobs, with per-row Resume/Cancel) when the user left-clicks either the listener's or the tray companion's icon.
@@ -55,6 +69,34 @@ Settings (`/settings` mode) has a "Restart App" button that closes the settings 
 6. Printing (`-print` routes) goes through `IPrintService` (`PdfiumPrintService`, using the MIT-licensed `PDFtoImage`/PDFium + SkiaSharp for rendering, then standard GDI+ `PrintDocument`) to `appsettings.json`'s configured `PrinterName`, or the system default if blank. (Spire.PDF was dropped — it stamped an unremovable "evaluation" watermark on every page unless licensed.)
 7. After sign/print, `IDocumentDownloader.PostSignedInvoiceCallback(...)` POSTs `{ClientId, TokenId, InvoiceNo, "signed-pdf": <base64>}` to `{InvoiceApiBaseUrl}/invoice-signed/` — this fires regardless of whether the document was actually signed (plain `/invoice`/`/invoice-print` routes still call back with the fetched bytes). A callback failure is logged but doesn't undo a successful sign/print.
 8. The temp download folder (`%TEMP%\digisign_{tokenId}_{timestamp}\`) is always cleaned up in a `finally`, per token.
+
+## Job tracking, resume, and cancel
+
+`JobTracker`/`JobRecord` (JobTracker.cs) is the shared model behind both listener-mode batches and batch-signing-mode runs — `JobsForm` reads `JobTracker.Snapshot()` to render recent activity for either source.
+
+- A `JobRecord` carries: identity (`JobId`, `Token`, `Route`, `Source` — `Listener`/`Batch`/`LabelPrint`), timing (`StartedAtUtc`/`CompletedAtUtc`), a `Stage` enum (`Received → Fetching → Signing → Signed`/`SkippedSigning` `→ Printing → Printed → Completed`/`Failed`/`Cancelled`/`Interrupted`), outcome fields (`Success`, `ErrorMessage`, `OutputPath`, `CallbackSuccess`/`CallbackMessage`), input context (`ClientId`, `InvoiceNo`, `InputPath`, `PathsToPrint`, `PrinterName`, `DoSign`/`DoPrint`, `DocumentType`, `FileName`, `ProgressDetail`), cancel/resume bookkeeping (`CancellationRequested`/`CancelRequestedAtUtc`, `ResumeCount`), and ownership (`OwnerProcessId`/`OwnerProcessStartTimeUtc`, `Sequence` for eviction order).
+- Persistence: `JobStore.Save` (JobStore.cs:30) writes `logs/jobs/{JobId}.json` via a temp-file + `FileOptions.WriteThrough` then rename, so a job record is never read half-written. `JobStore.Prune` handles time-based disk cleanup of old job files separately from the in-memory ring buffer below.
+- In-memory ring buffer: `EvictOldest()` (JobTracker.cs:403) only trims once the in-memory dict exceeds 200 entries, and only evicts jobs already in a terminal stage (`Completed`/`Failed`/`Cancelled` — never `Interrupted` or still in-flight), oldest-by-`Sequence` first. It never deletes the on-disk JSON.
+- Cancel is cooperative, not preemptive: `RequestCancel` just sets a flag that's checked between pipeline steps — a step already running (e.g. mid-signature) finishes before cancellation takes effect.
+- Resume (`ResumeJob`) requires `IsResumable` (job is `Failed`/`Interrupted`/`Cancelled`, or `Completed` with a failed callback), then resets cancellation, increments `ResumeCount`, and redispatches to the source-appropriate handler (`HttpListenerService.ProcessResumedJob` or `Program.ResumeBatchJob`) on a ThreadPool thread — it re-enters the same pipeline but skips steps already checkpointed (e.g. signing is skipped if `PathsToPrint` files already exist on disk from a prior attempt).
+
+## Label printing
+
+Added alongside the resume/cancel work — a synchronous, job-pipeline-adjacent path for printing shipping/product labels via raw ZPL, independent of the invoice fetch/sign flow:
+
+- `POST /label-print` takes `{"Printer": "...", "Zpl": "..."}`; the ZPL body is validated to look like `^XA...^XZ` (`LabelPrintPipeline.cs`) before anything is sent to a printer, and the response is synchronous success/fail (no `202`/job-polling involved, unlike the invoice routes) — though a `JobRecord` with `Source = LabelPrint` is still created for visibility in `JobsForm`.
+- `LabelPrinter.cs` (`RawZplPrintService`/`RawPrinterHelper`) sends the raw ZPL bytes straight to the Windows spooler via `winspool.drv` P/Invoke as a `RAW` datatype job, bypassing GDI+/`PrintDocument` entirely (ZPL printers expect raw command bytes, not rendered graphics) — bounded by a 15s timeout.
+- `PrinterStatusChecker.cs` checks a printer's online/offline status before a print attempt.
+- `GET /label-printers` (see HTTP listener mode above) lists installed Windows printers so the ERP can pick a valid `Printer` value up front.
+- The label-copy layout fields themselves (copy text, X/Y/width/height, "print all copies", copy 2/3/4) are configured in `/settings`'s `tabSignature` tab and stored in `IP.xml`/`XmlData`, not `appsettings.json`.
+
+## Update checker / self-update
+
+Manual only — there is no automatic/background check anywhere (not at listener startup, not at tray-companion startup, not on a timer). A "Check for Updates" button lives in `/admin` mode's API Settings tab, next to `appsettings.json`'s `UpdateCheckUrl` field (blank = nothing to check against yet) — **admin-only, not present in `/settings`**: `CreateApiSettingsTab` only creates `lblUpdateCheckUrl`/`txtUpdateCheckUrl`/`btnCheckForUpdates` when `!settingsOnlyMode`, so a customer running `/settings` never sees update controls at all (checking for/shipping updates is Ten Info Tech's call, not the customer's). `LoadApiSettings`/`LoadDefaultApiSettings` and both Save handlers null-guard every reference to these controls, and Saving from `/settings` preserves whatever `UpdateCheckUrl` is already on disk instead of blanking it. `LicenseGenerationForm.BtnCheckForUpdates_Click` checks whatever URL is currently in the textbox — so an admin can test a URL before saving it — on a `ThreadPool` thread, marshaling the result back via `BeginInvoke` so the form doesn't freeze while checking.
+
+- [UpdateChecker.cs](UpdateChecker.cs) `GET`s the URL expecting `{"version", "downloadUrl", "sha256", "notes"}`, compares `version` against `VersionInfo.FullVersion` as a `System.Version`. Every failure (network, bad JSON, unparsable version) is swallowed and logged only — same fail-open convention as the TSA/OCSP clients in `SignatureHelper.cs`.
+- If a newer version is found, [UpdateNotificationForm.cs](UpdateNotificationForm.cs) is shown with "Update Now"/"Not Now" buttons. If not, or if the check itself failed, a plain `MessageBox` says so.
+- "Update Now" calls `LicenseGenerationForm.ApplyUpdate`, which calls [SelfUpdater.cs](SelfUpdater.cs) `DownloadAndApply`: downloads the zip, verifies its `sha256` (aborts with the current install untouched on mismatch or if the manifest omits it), extracts to a temp staging folder, writes a PowerShell helper script, launches it, then the app exits (`Application.Exit()`) so its own file lock releases. The helper waits for the old process to exit, `robocopy`s the staged files over the install directory with `/XF` excluding `SelfUpdater.ProtectedFileNames` (`license.txt`, `license.key`, `admin.license`, `IP.xml`, `appsettings.json`, `plf.txt`, `trial.lic`) and `/XD logs` — **this exclude-list is what guarantees license/signing/print-format settings and trial state survive an update**, and a future installer must use the same list. Windows won't let a running EXE overwrite its own file, which is why this two-process (main app → helper script) shape is necessary at all. The relaunch uses no args, so the restarted process picks its mode from `appsettings.json`'s `EnableListenerMode` as normal.
 
 ## PDF signing internals
 
@@ -76,3 +118,21 @@ Settings (`/settings` mode) has a "Restart App" button that closes the settings 
 ## Versioning
 
 [VersionInfo.cs](VersionInfo.cs) doesn't use the assembly's version number directly — it derives a synthetic build number from the assembly's build date (days since 2000-01-01) and a revision from seconds-since-midnight/2, so version strings auto-increment per build without manual bumping.
+
+## Forms / UI
+
+All forms build their controls programmatically in `InitializeComponents()` — there are no `.Designer.cs` files.
+
+- `LicenseGenerationForm.cs` (~3000+ lines) — dual-purpose: plain license generation (`tabLicense`) and, via the `settingsOnly` constructor flag, the entire `/settings` UI (`tabSettings`, described in the config-files section above). Its "Restart App" button only enables after a successful Save and relaunches into whatever mode was running before Settings was opened.
+- `JobsForm.cs` — a single `DataGridView` (columns: Time, Source, Route/File, Token/File, Doc Type, Stage, Progress, Result, Callback, Output/Error, plus Resume/Cancel button columns) that polls `JobTracker.Snapshot()` every second via a `Timer`. Closing the form hides it rather than disposing it, so polling keeps running — it's a singleton opened by left-clicking either the listener's or the tray companion's tray icon.
+- `VerboseProgressForm.cs` — `RichTextBox` progress log + `ProgressBar` + status labels, shown only in batch-signing mode when `/verbose`/`VerboseMode` is set; auto-closes when signing finishes.
+- `TrayHostForm.cs` — an invisible 0×0 form that exists purely to give the tray icon's owning thread a window handle for `Invoke`/`BeginInvoke` marshaling.
+- Tray context menus are built directly in `Program.cs` (`RunListenMode`/`RunTrayCompanionMode`, roughly lines 816–1010): a disabled header line (port number for listener mode, "idle (signing mode)" for the companion), then "View Job Status...", "Settings...", "Open Logs Folder", "Exit".
+
+## Admin-license tooling
+
+`tools/admin-license/` holds the operator-side scripts for generating/testing `admin.license` files outside the app itself: `DigiSign_Admin.bat` (launches `/admin` in a console so prompts are visible), `GenerateAdminLicense.ps1` (computes the `AdminKey` and writes the file), and a couple of test/diagnostic `.bat` scripts, plus `admin.license.example`/`.template` samples. These mirror `AdminKeyTester.cs`/`AdminLicenseValidator.cs`, which are excluded from the main build (see Build/run above).
+
+## Repo hygiene note
+
+`license.txt`, `license.key`, `admin.license`, `plf.txt`, and `application_log.txt` have historically been tracked in git even though they're machine-specific, generated, or secret-like — don't assume the versions in a fresh clone are meaningful test fixtures, and don't add new instances of this pattern (prefer `.example`/`.template` files for anything that should ship as a placeholder).

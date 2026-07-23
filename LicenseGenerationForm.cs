@@ -54,6 +54,7 @@ namespace DigiSign
         private CheckBox chkEnableOcspCheck;
         private Label lblOcspTimeoutSeconds;
         private NumericUpDown numOcspTimeoutSeconds;
+        private Label lblLicenseStatus;
 
         // API Settings Tab (listener / invoice-label download configuration)
         private TabPage tabApiSettings;
@@ -68,6 +69,9 @@ namespace DigiSign
         private CheckBox chkIncludeSignedPdfInCallback;
         private Label lblInvoiceSignedCallbackUrl;
         private TextBox txtInvoiceSignedCallbackUrl;
+        private Label lblUpdateCheckUrl;
+        private TextBox txtUpdateCheckUrl;
+        private Button btnCheckForUpdates;
         private Label lblApiSettingsNote;
         private Label lblPrinterName;
         private ComboBox cmbPrinterName;
@@ -598,7 +602,7 @@ namespace DigiSign
                 Minimum = 1024,
                 Maximum = 65535,
                 DecimalPlaces = 0,
-                Value = 8943
+                Value = 5000
             };
             tabApiSettings.Controls.Add(numListenerPort);
             currentY += textBoxHeight + spacing + 10;
@@ -694,6 +698,41 @@ namespace DigiSign
             };
             tabApiSettings.Controls.Add(txtInvoiceSignedCallbackUrl);
             currentY += textBoxHeight + spacing + 10;
+
+            // Update checking is an admin-only operation (Ten Info Tech decides when/what to ship) -
+            // these controls only exist in /admin mode, never in the customer-facing /settings mode.
+            if (!settingsOnlyMode)
+            {
+                lblUpdateCheckUrl = new Label
+                {
+                    Text = "Update Check URL (optional - blank = update checking disabled):",
+                    Location = new Point(leftMargin, currentY),
+                    Size = new Size(660, labelHeight),
+                    Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                };
+                tabApiSettings.Controls.Add(lblUpdateCheckUrl);
+                currentY += labelHeight + 5;
+
+                txtUpdateCheckUrl = new TextBox
+                {
+                    Location = new Point(leftMargin, currentY),
+                    Size = new Size(660, textBoxHeight),
+                    Font = new Font("Segoe UI", 9)
+                };
+                tabApiSettings.Controls.Add(txtUpdateCheckUrl);
+                currentY += textBoxHeight + spacing;
+
+                btnCheckForUpdates = new Button
+                {
+                    Text = "Check for Updates",
+                    Size = new Size(160, 30),
+                    Location = new Point(leftMargin, currentY),
+                    Font = new Font("Segoe UI", 9)
+                };
+                btnCheckForUpdates.Click += BtnCheckForUpdates_Click;
+                tabApiSettings.Controls.Add(btnCheckForUpdates);
+                currentY += 30 + spacing + 10;
+            }
 
             // Listener Mode toggle
             chkEnableListenerMode = new CheckBox
@@ -924,6 +963,36 @@ namespace DigiSign
             };
             tabGeneral.Controls.Add(numOcspTimeoutSeconds);
             currentY += textBoxHeight + spacing + 10;
+
+            lblLicenseStatus = new Label
+            {
+                Text = GetLicenseStatusText(),
+                Location = new Point(leftMargin, currentY),
+                Size = new Size(660, 20),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                ForeColor = Color.DimGray
+            };
+            tabGeneral.Controls.Add(lblLicenseStatus);
+            currentY += textBoxHeight + spacing;
+        }
+
+        /// <summary>Short one-line license/trial summary shown on the General settings tab - "Licensed until ...", "Trial: N day(s) remaining", or "Trial expired - a license is required".</summary>
+        private static string GetLicenseStatusText()
+        {
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+            if (File.Exists(licensePath) && LicenseManager.ValidateLicense(licensePath))
+            {
+                int daysRemaining = LicenseManager.GetLicenseExpiryDays(licensePath);
+                return daysRemaining >= 0
+                    ? $"License status: Licensed ({daysRemaining} day(s) remaining)"
+                    : "License status: Licensed";
+            }
+
+            string trialPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TrialManager.TrialFileName);
+            var trialStatus = TrialManager.GetTrialStatus(trialPath);
+            return trialStatus.IsActive
+                ? $"License status: Trial ({trialStatus.DaysRemaining} day(s) remaining)"
+                : "License status: Trial expired - a license is required";
         }
         
         private void CreateSignatureSettingsTab()
@@ -1554,7 +1623,7 @@ namespace DigiSign
             chkVerboseMode.Checked = settings.VerboseMode;
 
             int port = settings.Port;
-            numListenerPort.Value = port >= 1024 && port <= 65535 ? port : 8943;
+            numListenerPort.Value = port >= 1024 && port <= 65535 ? port : 5000;
 
             txtInvoiceApiBaseUrl.Text = settings.InvoiceApiBaseUrl ?? "";
             txtInvoiceApiKey.Text = settings.InvoiceApiKey ?? "";
@@ -1562,6 +1631,8 @@ namespace DigiSign
             UpdateApiKeyEnabled();
             chkIncludeSignedPdfInCallback.Checked = settings.IncludeSignedPdfInCallback;
             txtInvoiceSignedCallbackUrl.Text = settings.InvoiceSignedCallbackUrl ?? "";
+            if (txtUpdateCheckUrl != null)
+                txtUpdateCheckUrl.Text = settings.UpdateCheckUrl ?? "";
             chkEnableListenerMode.Checked = settings.EnableListenerMode;
 
             if (string.IsNullOrWhiteSpace(settings.PrinterName))
@@ -1621,13 +1692,15 @@ namespace DigiSign
         private void LoadDefaultApiSettings()
         {
             chkVerboseMode.Checked = false; // Default to not verbose
-            numListenerPort.Value = 8943;
+            numListenerPort.Value = 5000;
             txtInvoiceApiBaseUrl.Text = "";
             txtInvoiceApiKey.Text = "";
             chkNoAuthApi.Checked = false;
             UpdateApiKeyEnabled();
             chkIncludeSignedPdfInCallback.Checked = true;
             txtInvoiceSignedCallbackUrl.Text = "";
+            if (txtUpdateCheckUrl != null)
+                txtUpdateCheckUrl.Text = "";
             chkEnableListenerMode.Checked = false; // Default to batch/signing mode
             cmbPrinterName.SelectedItem = SystemDefaultPrinterLabel;
             chkEnableOcspCheck.Checked = true;
@@ -1747,6 +1820,9 @@ namespace DigiSign
                     NoAuthApi = chkNoAuthApi.Checked,
                     IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
                     InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
+                    // Update Check URL is only editable in /admin mode; in /settings mode (where the
+                    // control doesn't exist) preserve whatever's already on disk instead of blanking it.
+                    UpdateCheckUrl = txtUpdateCheckUrl?.Text ?? AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath).UpdateCheckUrl,
                     EnableListenerMode = chkEnableListenerMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
@@ -1789,6 +1865,9 @@ namespace DigiSign
                     NoAuthApi = chkNoAuthApi.Checked,
                     IncludeSignedPdfInCallback = chkIncludeSignedPdfInCallback.Checked,
                     InvoiceSignedCallbackUrl = txtInvoiceSignedCallbackUrl.Text,
+                    // Update Check URL is only editable in /admin mode; in /settings mode (where the
+                    // control doesn't exist) preserve whatever's already on disk instead of blanking it.
+                    UpdateCheckUrl = txtUpdateCheckUrl?.Text ?? AppSettingsLoader.Load(AppSettingsLoader.DefaultPath, xmlFilePath).UpdateCheckUrl,
                     EnableListenerMode = chkEnableListenerMode.Checked,
                     PrinterName = cmbPrinterName.SelectedItem?.ToString() == SystemDefaultPrinterLabel
                         ? ""
@@ -1815,6 +1894,97 @@ namespace DigiSign
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
+            }
+        }
+
+        /// <summary>
+        /// Manual, on-demand update check - checking is never automatic (no background check runs
+        /// at listener/tray-companion startup). Uses whatever URL is currently in the textbox, so an
+        /// admin can test a URL before saving it. Runs the HTTP call on a ThreadPool thread and
+        /// marshals back via BeginInvoke so the Settings form doesn't freeze while checking.
+        /// </summary>
+        private void BtnCheckForUpdates_Click(object sender, EventArgs e)
+        {
+            string url = txtUpdateCheckUrl.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                MessageBox.Show(
+                    "Enter an Update Check URL above first.",
+                    "Check for Updates",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            btnCheckForUpdates.Enabled = false;
+            btnCheckForUpdates.Text = "Checking...";
+
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                UpdateCheckResult result = null;
+                try
+                {
+                    result = UpdateChecker.CheckForUpdate(url);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"Manual update check failed: {ex.Message}");
+                }
+
+                if (this.IsDisposed) return;
+                this.BeginInvoke(new Action(() =>
+                {
+                    btnCheckForUpdates.Enabled = true;
+                    btnCheckForUpdates.Text = "Check for Updates";
+
+                    if (result == null)
+                    {
+                        MessageBox.Show(
+                            "Could not check for updates - see the log for details.",
+                            "Check for Updates",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    if (!result.IsUpdateAvailable)
+                    {
+                        MessageBox.Show(
+                            $"You're up to date (current version: v{VersionInfo.ShortVersion}).",
+                            "Check for Updates",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    var notification = new UpdateNotificationForm(result.Manifest);
+                    notification.UpdateNowClicked += () => ApplyUpdate(result.Manifest);
+                    notification.Show(this);
+                }));
+            });
+        }
+
+        /// <summary>Downloads/verifies/applies the update, then exits so the update helper can replace this process's files. Relaunches with no args - the restarted process picks its mode from appsettings.json's EnableListenerMode as usual.</summary>
+        private void ApplyUpdate(UpdateManifest manifest)
+        {
+            try
+            {
+                SelfUpdater.DownloadAndApply(manifest, "");
+                MessageBox.Show(
+                    "Update downloaded and verified - DigiSign will restart now.",
+                    "Check for Updates",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to apply update", ex);
+                MessageBox.Show(
+                    $"Failed to apply update:\n{ex.Message}\n\nThe current installation was left unchanged.",
+                    "Check for Updates",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 

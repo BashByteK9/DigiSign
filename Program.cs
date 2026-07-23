@@ -67,6 +67,12 @@ namespace DigiSign
             
             // Declare adminLicensePath once for the entire method scope
             string adminLicensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "admin.license");
+            string trialPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TrialManager.TrialFileName);
+
+            // Starts the 30-day evaluation clock on this device's first-ever run (any mode) - a no-op
+            // if a trial marker already exists for this device, regardless of whether a license.txt
+            // is later added.
+            TrialManager.EnsureTrialStarted(trialPath);
 
             // Check if admin mode or settings mode is requested FIRST (before verbose mode check)
             bool isAdminMode = args.Length > 0 && args[0].Equals("/admin", StringComparison.OrdinalIgnoreCase);
@@ -268,7 +274,9 @@ namespace DigiSign
             
             // Check user license for PDF signing
             bool hasValidUserLicense = false;
+            bool isTrialMode = false;
             int licenseExpiryDaysRemaining = -1; // Track days until expiry
+            int trialDaysRemaining = -1;
             
             if (File.Exists(licensePath))
             {
@@ -329,37 +337,59 @@ namespace DigiSign
                     Logger.Info("Admin license detected but not running in admin mode");
                 }
 
-                Logger.Error("Application terminated - No valid user license");
-                Logger.LogToPlf("Error: No valid user license - PDF signing aborted", isError: true);
-
-                if (isVerboseMode)
+                // No purchased license - fall back to the 30-day evaluation period (if still active)
+                // before refusing to sign. This never overrides an invalid/expired *purchased* license;
+                // it only applies when license.txt is absent or was never valid to begin with.
+                var trialStatus = TrialManager.GetTrialStatus(trialPath);
+                if (trialStatus.IsActive)
                 {
-                    verboseForm.AppendText("\n", Color.Black);
-                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Red, true);
-                    verboseForm.AppendText("ERROR: Valid user license required for PDF signing!\n", Color.Red, true);
-                    verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Red, true);
-                    verboseForm.AppendError("Application cannot continue without valid user license");
-                    Application.DoEvents();
-
-                    // Complete with error
-                    verboseForm.ProcessingComplete(true, totalErrorCount);
-                    Application.Run(verboseForm);
+                    isTrialMode = true;
+                    trialDaysRemaining = trialStatus.DaysRemaining;
+                    hasValidUserLicense = true;
+                    totalErrorCount = 0; // clear the license-failure error counted above - trial covers it
+                    Logger.Info($"No valid purchased license - proceeding in TRIAL MODE ({trialDaysRemaining} day(s) remaining)");
+                    if (isVerboseMode)
+                    {
+                        verboseForm.AppendText($"TRIAL MODE - {trialDaysRemaining} day(s) remaining\n", Color.DarkOrange, true);
+                        Application.DoEvents();
+                    }
                 }
                 else
                 {
-                    MessageBox.Show(
-                        "Valid user license required for PDF signing!\n\nPlease ensure you have a valid license.txt file.\nContact support for a license if you don't have one.",
-                        "License Required",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
+                    Logger.Error("Application terminated - No valid user license and trial period has ended");
+                    Logger.LogToPlf("Error: No valid user license - PDF signing aborted", isError: true);
+
+                    if (isVerboseMode)
+                    {
+                        verboseForm.AppendText("\n", Color.Black);
+                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Red, true);
+                        verboseForm.AppendText("ERROR: Valid user license required for PDF signing!\n", Color.Red, true);
+                        verboseForm.AppendText("═══════════════════════════════════════════════════════════\n", Color.Red, true);
+                        verboseForm.AppendError("Application cannot continue without valid user license");
+                        Application.DoEvents();
+
+                        // Complete with error
+                        verboseForm.ProcessingComplete(true, totalErrorCount);
+                        Application.Run(verboseForm);
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            "Valid user license required for PDF signing!\n\nYour 30-day evaluation period has ended.\nPlease purchase a license, or ensure you have a valid license.txt file.\nContact support for a license if you don't have one.",
+                            "License Required",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                    return;
                 }
-                return;
             }
 
 
 
 
-            Logger.Info("Application mode: FULL (valid user license)");
+            Logger.Info(isTrialMode
+                ? $"Application mode: TRIAL ({trialDaysRemaining} day(s) remaining)"
+                : "Application mode: FULL (valid user license)");
 
             // Show license expiration warning if expiring within 15 days
             if (licenseExpiryDaysRemaining >= 0 && licenseExpiryDaysRemaining <= 15)
@@ -751,7 +781,7 @@ namespace DigiSign
                 return;
             }
 
-            int port = appSettings.Port > 0 ? appSettings.Port : 8943;
+            int port = appSettings.Port > 0 ? appSettings.Port : 5000;
             var downloader = new HttpDocumentDownloader(appSettings.InvoiceApiBaseUrl, appSettings.InvoiceApiKey, appSettings.NoAuthApi, appSettings.IncludeSignedPdfInCallback, appSettings.InvoiceSignedCallbackUrl);
 
             // If an idle tray companion (spawned by a prior batch run) already owns the tray-presence
@@ -814,7 +844,7 @@ namespace DigiSign
                 };
 
                 var menu = new ContextMenuStrip();
-                menu.Items.Add($"DigiSign Listener — port {port}").Enabled = false;
+                menu.Items.Add($"DigiSign Listener — port {port}{GetTraySubtitleSuffix()}").Enabled = false;
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("View Job Status...", null, (s, e) => showJobsForm());
                 menu.Items.Add("Settings...", null, (s, e) =>
@@ -942,6 +972,20 @@ namespace DigiSign
             JobTracker.Complete(jobId, true, signResult.OutputPaths[0], null);
         }
 
+        /// <summary>Returns a short " — Trial: N day(s) left" / " — Trial expired" suffix for tray menu headers when no valid purchased license exists; empty string once fully licensed.</summary>
+        private static string GetTraySubtitleSuffix()
+        {
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+            if (File.Exists(licensePath) && LicenseManager.ValidateLicense(licensePath))
+                return "";
+
+            string trialPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TrialManager.TrialFileName);
+            var trialStatus = TrialManager.GetTrialStatus(trialPath);
+            return trialStatus.IsActive
+                ? $" — Trial: {trialStatus.DaysRemaining} day(s) left"
+                : " — Trial expired, license required";
+        }
+
         /// <summary>Builds a visible <see cref="NotifyIcon"/> using DigiSign's embedded tray icon image.</summary>
         private static NotifyIcon BuildTrayIcon(ContextMenuStrip menu, string tooltip)
         {
@@ -996,7 +1040,7 @@ namespace DigiSign
                 };
 
                 var menu = new ContextMenuStrip();
-                menu.Items.Add("DigiSign — idle (signing mode)").Enabled = false;
+                menu.Items.Add($"DigiSign — idle (signing mode){GetTraySubtitleSuffix()}").Enabled = false;
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("View Job Status...", null, (s, e) => showJobsForm());
                 menu.Items.Add("Settings...", null, (s, e) =>

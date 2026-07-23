@@ -24,13 +24,13 @@ Output goes to `..\..\Build\Digisign\` relative to the repo (e.g. `C:\Users\<use
 ## Configuration
 
 - **`IP.xml`** — legacy, positional config written by the ERP (Tally-style): input files, output folder, certificate CommonName, PIN, signature placement, sign-on-page mode.
-- **`appsettings.json`** — listener-mode settings: `Port` (default `8943`), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `PrinterName`, `EnableOcspCheck`/`OcspTimeoutSeconds`, `EnableListenerMode`, etc. Auto-created/migrated on first run if missing.
+- **`appsettings.json`** — listener-mode settings: `Port` (default `5000`), `InvoiceApiBaseUrl`, `InvoiceApiKey`, `PrinterName`, `EnableOcspCheck`/`OcspTimeoutSeconds`, `EnableListenerMode`, `UpdateCheckUrl` (blank = update checking disabled), etc. Auto-created/migrated on first run if missing.
 
 Both are edited together via `DigiSign.exe /settings`.
 
 ## HTTP listener API
 
-Base URL: `http://localhost:{port}/` (`Port` in `appsettings.json`, default `8943`; the local dev build defaults to `5000`). All responses are JSON. CORS is open (`Access-Control-Allow-Origin: *` unless an `Origin` header is echoed back) and `OPTIONS` preflight is handled generically for every route.
+Base URL: `http://localhost:{port}/` (`Port` in `appsettings.json`, default `5000`). All responses are JSON. CORS is open (`Access-Control-Allow-Origin: *` unless an `Origin` header is echoed back) and `OPTIONS` preflight is handled generically for every route.
 
 | Method | Route | Purpose |
 |---|---|---|
@@ -134,3 +134,9 @@ Confirms the listener process itself is up and responding — no license check, 
 ## Licensing
 
 Two independent tiers: a **user license** (`license.txt`, device-locked, required to sign PDFs) and an **admin license** (`admin.license`, gates `/admin` mode). The listener always starts regardless of user-license validity — licensing is enforced per request, not at startup.
+
+A brand-new install with no `license.txt` gets a 30-day evaluation period instead of being blocked outright — signing works normally during this window, and after it ends the existing "valid license required" behavior applies. Remaining trial days are shown in `/settings`' General tab and in the tray icon's context-menu header.
+
+## Update checking
+
+There's no automatic/background update check. `DigiSign.exe /admin` has a "Check for Updates" button next to the `UpdateCheckUrl` field (manifest format: `{"version", "downloadUrl", "sha256", "notes"}`) — click it to check on demand. This is admin-only (not shown in `/settings`); deciding when to check for and ship an update is Ten Info Tech's call, not a customer-facing setting. If a newer version is found, "Update Now" downloads and verifies the package, then applies it via a helper script that always preserves `license.txt`, `license.key`, `admin.license`, `IP.xml`, `appsettings.json`, `plf.txt`, and `trial.lic` — an update never resets a license or signing/print configuration.
