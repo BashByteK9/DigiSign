@@ -121,12 +121,41 @@ namespace DigiSign
 
         #region User License Validation
 
+        private enum LicenseCheckResult
+        {
+            /// <summary>Well-formed, belongs to this device, hash matches, not expired.</summary>
+            Valid,
+            /// <summary>Fields present and device matches, but the tamper-resistant DeviceHash doesn't
+            /// match what's expected - i.e. ValidUntil (or another hashed field) was hand-edited.</summary>
+            Tampered,
+            /// <summary>Missing file/fields, wrong device, unparsable date, or a genuinely expired date.</summary>
+            Other
+        }
+
         /// <summary>
         /// Validates a user license file
         /// </summary>
         /// <param name="filePath">Path to the license.txt file</param>
         /// <returns>True if license is valid and not expired</returns>
         public static bool ValidateLicense(string filePath)
+        {
+            return CheckLicense(filePath) == LicenseCheckResult.Valid;
+        }
+
+        /// <summary>
+        /// True only when the license file's fields are otherwise well-formed and belong to this
+        /// device, but the tamper-resistant DeviceHash doesn't match what's expected - i.e. ValidUntil
+        /// (or another field folded into the hash) was edited by hand. Distinct from a merely
+        /// missing/malformed/wrong-device/genuinely-expired license, so callers can surface a clear
+        /// "your license has expired" notice specifically for tampering, mirroring how trial.lic
+        /// tampering is treated as expired (see TrialManager).
+        /// </summary>
+        public static bool IsLicenseTampered(string filePath)
+        {
+            return CheckLicense(filePath) == LicenseCheckResult.Tampered;
+        }
+
+        private static LicenseCheckResult CheckLicense(string filePath)
         {
             try
             {
@@ -150,22 +179,22 @@ namespace DigiSign
                 if (!licenseData.ContainsKey("DeviceID"))
                 {
                     Logger.Warning("License validation failed: DeviceID field is missing");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (!licenseData.ContainsKey("DeviceHash"))
                 {
                     Logger.Warning("License validation failed: DeviceHash field is missing");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (!licenseData.ContainsKey("LicenseNumber"))
                 {
                     Logger.Warning("License validation failed: LicenseNumber field is missing");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (!licenseData.ContainsKey("ValidUntil"))
                 {
                     Logger.Warning("License validation failed: ValidUntil field is missing");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
 
                 string storedDeviceId = licenseData["DeviceID"];
@@ -181,22 +210,22 @@ namespace DigiSign
                 if (string.IsNullOrWhiteSpace(storedDeviceId))
                 {
                     Logger.Warning("License validation failed: DeviceID is empty");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (string.IsNullOrWhiteSpace(storedHash))
                 {
                     Logger.Warning("License validation failed: DeviceHash is empty");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (string.IsNullOrWhiteSpace(licenseNumber))
                 {
                     Logger.Warning("License validation failed: LicenseNumber is empty");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
                 if (string.IsNullOrWhiteSpace(validUntil))
                 {
                     Logger.Warning("License validation failed: ValidUntil is empty");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
 
                 string currentDeviceId = GetDeviceId();
@@ -211,14 +240,14 @@ namespace DigiSign
                     Logger.Info("  1. Run the application on the original computer, OR");
                     Logger.Info("  2. Generate a new license.key file on this computer");
                     Logger.Info("  3. Send the new license.key to admin to generate a new license.txt");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
 
                 // CRITICAL: Include ValidUntil in hash to prevent date tampering
                 string computedHash = GenerateDeviceHash(currentDeviceId, licenseNumber, validUntil);
                 Logger.Debug($"Stored Hash:   {storedHash}");
                 Logger.Debug($"Computed Hash: {computedHash}");
-                
+
                 if (computedHash != storedHash)
                 {
                     Logger.Warning($"License validation failed: Device hash mismatch");
@@ -229,21 +258,21 @@ namespace DigiSign
                     Logger.Info("  - ValidUntil date was manually changed");
                     Logger.Info("  - License file was edited or corrupted");
                     Logger.Info("  - License file is from a different device");
-                    return false;
+                    return LicenseCheckResult.Tampered;
                 }
 
                 if (!DateTime.TryParse(validUntil, out var validDate))
                 {
                     Logger.Warning($"License validation failed: Invalid date format: {validUntil}");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
-                
+
                 if (validDate < DateTime.Now)
                 {
                     Logger.Warning($"License validation failed: License expired");
                     Logger.Warning($"  Expiry date: {validDate:yyyy-MM-dd}");
                     Logger.Warning($"  Current date: {DateTime.Now:yyyy-MM-dd}");
-                    return false;
+                    return LicenseCheckResult.Other;
                 }
 
                 Logger.Info("✅ License validation successful");
@@ -259,13 +288,13 @@ namespace DigiSign
                 {
                     Logger.Warning($"License expiring soon: {daysRemaining} days remaining");
                 }
-                
-                return true;
+
+                return LicenseCheckResult.Valid;
             }
             catch (Exception ex)
             {
                 Logger.Error("Error validating license", ex);
-                return false;
+                return LicenseCheckResult.Other;
             }
         }
 
@@ -353,6 +382,32 @@ namespace DigiSign
             catch (Exception ex)
             {
                 Logger.Error("Failed to show license expiration warning", ex);
+            }
+        }
+
+        /// <summary>
+        /// Shows a notification that the license has expired, for the tampered-license case
+        /// specifically (see <see cref="IsLicenseTampered"/>) - deliberately worded as "expired"
+        /// rather than "tampered", mirroring how a tampered trial.lic is silently treated as expired
+        /// rather than as a detected attack (see TrialManager).
+        /// </summary>
+        public static void ShowLicenseExpiredNotification()
+        {
+            try
+            {
+                Logger.Warning("Showing license expired notification (DeviceHash mismatch on license.txt)");
+
+                string message = "Your DigiSign license has expired.\n\n" +
+                                "Please contact your administrator or Ten Info Tech for a new license.\n\n" +
+                                "Click OK to continue.";
+
+                MessageBox.Show(message, "License Expired", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                Logger.Info("License expired notification displayed to user");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to show license expired notification", ex);
             }
         }
 

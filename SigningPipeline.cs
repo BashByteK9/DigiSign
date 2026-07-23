@@ -31,6 +31,15 @@ namespace DigiSign
         {
             licenseIssue = null;
 
+            if (xmlData == null || string.IsNullOrEmpty(xmlData.CommonName) || string.IsNullOrEmpty(xmlData.OutputFolderPath))
+            {
+                return new SignSingleFileResult
+                {
+                    Success = false,
+                    Error = "PDF signing settings are not configured. Run 'DigiSign.exe /settings' first."
+                };
+            }
+
             if (!LicenseManager.ValidateLicense(licensePath))
             {
                 // No valid purchased license - fall back to the 30-day evaluation period (if still

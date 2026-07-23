@@ -208,6 +208,12 @@ namespace DigiSign
             LoadSigningSettings();
             LoadApiSettings();
             WasCancelled = true; // Default to cancelled unless user clicks Generate
+
+            string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+            if (File.Exists(licensePath) && LicenseManager.IsLicenseTampered(licensePath))
+            {
+                LicenseManager.ShowLicenseExpiredNotification();
+            }
         }
 
         private void InitializeComponents()
@@ -3080,6 +3086,25 @@ namespace DigiSign
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
                     return;
+                }
+
+                // Same license/trial gate as SigningPipeline.SignSingleFile - this test button must not
+                // be able to sign when the real signing paths would refuse to.
+                string licensePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "license.txt");
+                if (!LicenseManager.ValidateLicense(licensePath))
+                {
+                    string trialPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TrialManager.TrialFileName);
+                    var trialStatus = TrialManager.GetTrialStatus(trialPath);
+                    if (!trialStatus.IsActive)
+                    {
+                        MessageBox.Show(
+                            "A valid license is required to sign PDFs.\n\nRun 'DigiSign.exe /admin' to generate a license, or check the trial status above.",
+                            "License Required",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+                    Logger.Info($"No valid purchased license - test-signing in TRIAL MODE ({trialStatus.DaysRemaining} day(s) remaining)");
                 }
 
                 // Create signature configuration from current settings

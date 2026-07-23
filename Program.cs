@@ -299,10 +299,17 @@ namespace DigiSign
                 {
                     Logger.Error("License validation failed - Cannot sign PDFs");
                     totalErrorCount++; // Count as error - PDF signing will fail
+                    bool licenseWasTampered = LicenseManager.IsLicenseTampered(licensePath);
                     if (isVerboseMode)
                     {
-                        verboseForm.AppendError("LICENSE INVALID - PDF signing not allowed");
+                        verboseForm.AppendError(licenseWasTampered ? "LICENSE EXPIRED" : "LICENSE INVALID - PDF signing not allowed");
                         Application.DoEvents();
+                    }
+                    else if (licenseWasTampered)
+                    {
+                        // Surfaced here (not just logged) even though a still-active trial may end up
+                        // covering signing below - the user should know their purchased license died.
+                        LicenseManager.ShowLicenseExpiredNotification();
                     }
                 }
             }
@@ -772,13 +779,19 @@ namespace DigiSign
 
             if (xmlData == null || string.IsNullOrEmpty(xmlData.CommonName) || string.IsNullOrEmpty(xmlData.OutputFolderPath))
             {
-                Logger.Error("Cannot start listen mode - IP.xml configuration invalid/missing (CommonName/OutputFolderPath required)");
-                MessageBox.Show(
-                    "Cannot start the listener: PDF signing settings are not configured.\n\nRun 'DigiSign.exe /settings' first.",
-                    "DigiSign Listener",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return;
+                // Deliberately not a startup gate - the listener/tray must come up regardless of
+                // config validity, same as it already does regardless of license validity (see the
+                // isListenMode branch in Main). A sign request against this incomplete config will be
+                // rejected cleanly by SigningPipeline.SignSingleFile instead.
+                Logger.Warning("IP.xml configuration is incomplete (CommonName/OutputFolderPath missing) - listener will start, but sign requests will be rejected until 'DigiSign.exe /settings' is configured");
+            }
+
+            // Non-blocking, like the config check above - the listener still starts regardless, but the
+            // user (who may otherwise never see this, since license issues are normally only reported
+            // per sign-request) is told up front that their purchased license has expired.
+            if (File.Exists(licensePath) && LicenseManager.IsLicenseTampered(licensePath))
+            {
+                LicenseManager.ShowLicenseExpiredNotification();
             }
 
             int port = appSettings.Port > 0 ? appSettings.Port : 5000;
