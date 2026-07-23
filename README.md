@@ -12,6 +12,16 @@ Output goes to `..\..\Build\Digisign\` relative to the repo (e.g. `C:\Users\<use
 
 `MockDocumentServer/` is a separate console project standing in for the real invoice provider API during local dev (`dotnet run` from that folder, listens on port 9091).
 
+## Building the installer
+
+`installer\DigiSign.iss` (Inno Setup 6) packages a Release build into a single `DigiSignSetup-<version>.exe` for distribution to customer machines. It installs to `C:\ProgramData\DigiSign` (writable by standard users, unlike Program Files) and never overwrites an existing `appsettings.json`/`IP.xml`/license/trial files on upgrade or repair — see the doc comment on `SelfUpdater.ProtectedFileNames` for why those specific filenames are never shipped by the installer.
+
+```
+installer\build.ps1
+```
+
+This runs `dotnet build DigiSign.csproj -c Release` and then compiles `installer\DigiSign.iss` with Inno Setup's `ISCC.exe` (install Inno Setup 6 first — `winget install JRSoftware.InnoSetup` or https://jrsoftware.org/isdl.php). The output lands in `installer\Output\DigiSignSetup-<version>.exe`, with the version pulled automatically from the built `DigiSign.exe`'s file version.
+
 ## Run modes
 
 | Mode | Trigger | License required | Purpose |

@@ -29,34 +29,76 @@ namespace DigiSign
         #region Device Identification
 
         /// <summary>
-        /// Gets a unique identifier for the current device based on CPU and disk serial numbers
+        /// Gets a unique identifier for the current device based on CPU and disk serial numbers.
+        /// Each half is resolved independently so a transient WMI failure on one side (CPU or
+        /// disk) doesn't collapse the whole fingerprint to "UNKNOWN_DEVICE" - see GetCpuId /
+        /// GetFirstDiskSerial. Selection order within each query is unchanged from before (still
+        /// "whichever result WMI returns first") to preserve the exact ID already stored in any
+        /// existing license.txt/trial.lic.
         /// </summary>
         public static string GetDeviceId()
         {
+            string cpuId = GetCpuId();
+            string diskId = GetFirstDiskSerial();
+
+            if (string.IsNullOrEmpty(cpuId) && string.IsNullOrEmpty(diskId))
+                return "UNKNOWN_DEVICE";
+
+            return $"{cpuId}_{diskId}";
+        }
+
+        /// <summary>
+        /// Returns false for "UNKNOWN_DEVICE" or any ID missing its CPU or disk half - i.e. a
+        /// degraded fallback from a transient WMI failure rather than a fully-resolved fingerprint.
+        /// </summary>
+        public static bool IsDeviceIdFullyResolved(string deviceId)
+        {
+            if (string.IsNullOrEmpty(deviceId) || deviceId == "UNKNOWN_DEVICE")
+                return false;
+
+            var parts = deviceId.Split(new[] { '_' }, 2);
+            return parts.Length == 2 && !string.IsNullOrEmpty(parts[0]) && !string.IsNullOrEmpty(parts[1]);
+        }
+
+        private static string GetCpuId()
+        {
             try
             {
-                string cpuId = "";
-                string diskId = "";
-
-                var cpuSearcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor");
-                foreach (var obj in cpuSearcher.Get())
+                using (var searcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor"))
                 {
-                    cpuId = obj["ProcessorId"]?.ToString();
-                    break;
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        using (obj)
+                            return obj["ProcessorId"]?.ToString() ?? "";
+                    }
                 }
-
-                var diskSearcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_DiskDrive");
-                foreach (var obj in diskSearcher.Get())
-                {
-                    diskId = obj["SerialNumber"]?.ToString();
-                    break;
-                }
-
-                return $"{cpuId}_{diskId}";
+                return "";
             }
-            catch
+            catch (Exception ex)
             {
-                return "UNKNOWN_DEVICE";
+                Logger.Warning($"GetDeviceId: CPU identifier lookup failed: {ex.Message}");
+                return "";
+            }
+        }
+
+        private static string GetFirstDiskSerial()
+        {
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_DiskDrive"))
+                {
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        using (obj)
+                            return obj["SerialNumber"]?.ToString() ?? "";
+                    }
+                }
+                return "";
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"GetDeviceId: disk identifier lookup failed: {ex.Message}");
+                return "";
             }
         }
 

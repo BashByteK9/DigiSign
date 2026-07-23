@@ -49,7 +49,19 @@ namespace DigiSign
                 }
 
                 if (existing != null)
+                {
+                    // A transient/partial device-ID resolution this run (e.g. one WMI query
+                    // failed) must not masquerade as "a different device" and wipe an otherwise
+                    // valid trial marker. Only treat this as a genuine relocation when the current
+                    // ID is fully resolved.
+                    if (!LicenseManager.IsDeviceIdFullyResolved(currentDeviceId))
+                    {
+                        Logger.Warning($"Trial marker device mismatch, but current DeviceID looks incomplete ({currentDeviceId}) - leaving existing trial marker untouched (likely a transient WMI hiccup, not a new device).");
+                        return;
+                    }
+
                     Logger.Info("Trial marker belongs to a different device - starting a fresh trial for this device");
+                }
 
                 string trialStartUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
                 string trialHash = GenerateTrialHash(currentDeviceId, trialStartUtc);

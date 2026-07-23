@@ -1,0 +1,14 @@
+DigiSign has been installed to C:\ProgramData\DigiSign.
+
+Next steps:
+
+  1. Run "DigiSign Settings" from the Start Menu to configure PDF signing
+     (IP.xml) and/or the HTTP listener (appsettings.json).
+  2. If this machine will run the HTTP listener continuously (for an ERP
+     integration), note that Setup does NOT configure DigiSign to start
+     automatically at Windows login. To do that yourself, add a shortcut
+     to "DigiSign.exe /listen" in this user's Startup folder
+     (Win+R, then shell:startup), or ask Ten InfoTech team for a support.
+
+A 30-day evaluation period starts automatically the first time DigiSign
+runs. Contact Ten Info Tech for a permanent license.

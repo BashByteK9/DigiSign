@@ -51,11 +51,38 @@ namespace DigiSign
             }
 
             var migrated = TryMigrateFromLegacyIpXml(legacyIpXmlPath);
-            var result = migrated ?? new AppSettings();
+            var result = migrated ?? LoadTemplateOrDefaults(appSettingsPath);
             Save(result, appSettingsPath);
             if (migrated != null)
                 Logger.Info("Migrated legacy listener settings from IP.xml into appsettings.json");
             return result;
+        }
+
+        // Seeds a brand-new appsettings.json from appsettings.json.example (shipped next to the
+        // exe by the installer) so a fresh install's real defaults - e.g. EnableListenerMode,
+        // InvoiceApiBaseUrl - come from that one template file instead of a second hardcoded
+        // copy in AppSettings.cs. Falls back to the class defaults if the template is missing
+        // or unparsable.
+        private static AppSettings LoadTemplateOrDefaults(string appSettingsPath)
+        {
+            string dir = Path.GetDirectoryName(Path.GetFullPath(appSettingsPath));
+            string templatePath = Path.Combine(dir ?? AppDomain.CurrentDomain.BaseDirectory, "appsettings.json.example");
+
+            if (File.Exists(templatePath))
+            {
+                try
+                {
+                    var settings = JsonConvert.DeserializeObject<AppSettings>(File.ReadAllText(templatePath));
+                    if (settings != null)
+                        return settings;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error parsing appsettings.json.example template - using built-in defaults", ex);
+                }
+            }
+
+            return new AppSettings();
         }
 
         public static void Save(AppSettings settings, string appSettingsPath = null)
